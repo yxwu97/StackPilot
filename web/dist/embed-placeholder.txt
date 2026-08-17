@@ -1,0 +1,1 @@
+This file keeps the embed target valid before the frontend production build runs.

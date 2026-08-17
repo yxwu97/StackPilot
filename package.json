@@ -1,0 +1,19 @@
+{
+  "name": "stackpilot",
+  "version": "0.0.0",
+  "private": true,
+  "workspaces": [
+    "web"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @stackpilot/web",
+    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1",
+    "build:web": "npm run build --workspace @stackpilot/web",
+    "type-check": "npm run type-check --workspace @stackpilot/web",
+    "check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1"
+  },
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=11.0.0"
+  }
+}

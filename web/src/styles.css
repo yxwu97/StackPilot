@@ -1,0 +1,127 @@
+:root {
+  color: #18212f;
+  background: #f5f7fa;
+  font-family:
+    Inter, "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 56px;
+  padding: 0 24px;
+  border-bottom: 1px solid #dfe4eb;
+  background: #ffffff;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.brand-mark {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 6px;
+  color: #ffffff;
+  background: #176b4d;
+  font-size: 14px;
+}
+
+.content {
+  width: min(1120px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 36px 0;
+}
+
+.page-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #dfe4eb;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: #647184;
+  font-size: 13px;
+}
+
+h1,
+h2,
+p {
+  letter-spacing: 0;
+}
+
+h1 {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.25;
+}
+
+.empty-state {
+  display: grid;
+  min-height: 360px;
+  place-items: center;
+  align-content: center;
+  padding: 48px 24px;
+  color: #657184;
+  text-align: center;
+}
+
+.empty-state h2 {
+  margin: 16px 0 6px;
+  color: #263244;
+  font-size: 18px;
+}
+
+.empty-state p {
+  max-width: 420px;
+  margin: 0;
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    padding: 0 16px;
+  }
+
+  .content {
+    width: calc(100% - 32px);
+    padding-top: 28px;
+  }
+
+  .page-heading {
+    align-items: flex-start;
+  }
+}
