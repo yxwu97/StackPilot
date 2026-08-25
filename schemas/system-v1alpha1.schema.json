@@ -1,0 +1,544 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stackpilot.dev/schemas/system-v1alpha1.schema.json",
+  "title": "StackPilot System Manifest",
+  "description": "Structural contract for stackpilot.io/v1alpha1 System manifests.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "const": "stackpilot.io/v1alpha1"
+    },
+    "kind": {
+      "const": "System"
+    },
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/systemSpec"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$"
+    },
+    "duration": {
+      "type": "string",
+      "pattern": "^(?:[1-9][0-9]*(?:ms|s|m|h))+$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1024
+        }
+      }
+    },
+    "systemSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["services"],
+      "properties": {
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "default": {}
+        },
+        "policies": {
+          "$ref": "#/$defs/policies"
+        },
+        "ports": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/identifier"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/port"
+          },
+          "default": {}
+        },
+        "services": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/identifier"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/service"
+          }
+        }
+      }
+    },
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "failFast": {
+          "type": "boolean",
+          "default": true
+        },
+        "cleanupOnFailure": {
+          "type": "boolean",
+          "default": false
+        },
+        "keepReadyServices": {
+          "type": "boolean",
+          "default": true
+        },
+        "stickyPorts": {
+          "type": "boolean",
+          "default": true
+        },
+        "startTimeout": {
+          "$ref": "#/$defs/duration",
+          "default": "10m"
+        },
+        "stopTimeout": {
+          "$ref": "#/$defs/duration",
+          "default": "2m"
+        }
+      },
+      "default": {}
+    },
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol"],
+      "properties": {
+        "protocol": {
+          "const": "tcp"
+        },
+        "preferred": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535
+        },
+        "fallbackRange": {
+          "type": "string",
+          "pattern": "^[0-9]{4,5}-[0-9]{4,5}$"
+        },
+        "conflictPolicy": {
+          "type": "string",
+          "enum": ["auto", "strict", "override-only"],
+          "default": "auto"
+        },
+        "exposure": {
+          "const": "loopback",
+          "default": "loopback"
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["driver"],
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "required": {
+          "type": "boolean",
+          "default": true
+        },
+        "driver": {
+          "type": "string",
+          "enum": ["process", "compose"],
+          "x-stackpilot-capability": {
+            "compose": "phase2.compose"
+          }
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["daemon", "oneshot"],
+          "default": "daemon",
+          "x-stackpilot-capability": {
+            "oneshot": "phase2.oneshot"
+          }
+        },
+        "runner": {
+          "type": "string",
+          "enum": ["maven", "npm", "java", "node", "go", "python-venv"],
+          "x-stackpilot-capability": {
+            "go": "workspace.runner.go",
+            "python-venv": "phase2.python-venv"
+          }
+        },
+        "virtualEnvironment": {
+          "$ref": "#/$defs/relativePath",
+          "x-stackpilot-capability": "phase2.python-venv"
+        },
+        "compose": {
+          "$ref": "#/$defs/composeService",
+          "x-stackpilot-capability": "phase2.compose"
+        },
+        "workingDirectory": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "arguments": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "environment": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "default": {}
+        },
+        "dependsOn": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/identifier"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["ready", "completed"],
+            "x-stackpilot-capability": {
+              "completed": "phase2.oneshot"
+            }
+          },
+          "default": {}
+        },
+        "readiness": {
+          "$ref": "#/$defs/healthCheck"
+        },
+        "liveness": {
+          "$ref": "#/$defs/healthCheck",
+          "x-stackpilot-capability": "phase2.liveness"
+        },
+        "stop": {
+          "$ref": "#/$defs/stop"
+        },
+        "restart": {
+          "$ref": "#/$defs/restart"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "driver": {
+                "const": "compose"
+              }
+            },
+            "required": ["driver"]
+          },
+          "then": {
+            "required": ["compose"],
+            "properties": {
+              "mode": {
+                "const": "daemon"
+              },
+              "readiness": {
+                "properties": {
+                  "type": {
+                    "const": "compose"
+                  }
+                }
+              }
+            },
+            "not": {
+              "anyOf": [
+                {"required": ["runner"]},
+                {"required": ["virtualEnvironment"]},
+                {"required": ["workingDirectory"]},
+                {"required": ["arguments"]}
+              ]
+            }
+          },
+          "else": {
+            "required": ["runner", "workingDirectory", "arguments"],
+            "properties": {
+              "readiness": {
+                "properties": {
+                  "type": {
+                    "not": {
+                      "const": "compose"
+                    }
+                  }
+                }
+              }
+            },
+            "not": {
+              "required": ["compose"]
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["mode"],
+            "properties": {
+              "mode": {
+                "const": "oneshot"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": ["readiness"]
+            }
+          },
+          "else": {
+            "required": ["readiness"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "runner": {
+                "const": "python-venv"
+              }
+            },
+            "required": ["runner"]
+          },
+          "then": {
+            "required": ["virtualEnvironment"]
+          },
+          "else": {
+            "not": {
+              "required": ["virtualEnvironment"]
+            }
+          }
+        }
+      ]
+    },
+    "composeService": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "services"],
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "services": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+          }
+        },
+        "buildPolicy": {
+          "type": "string",
+          "enum": ["never", "always"],
+          "default": "never",
+          "x-stackpilot-capability": {
+            "always": "phase2.compose-build"
+          }
+        },
+        "readiness": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["healthy", "running"]
+          }
+        },
+        "ports": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/identifier"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/composePort"
+          },
+          "default": {}
+        },
+        "environment": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "propertyNames": {
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 16384
+            }
+          },
+          "default": {}
+        }
+      }
+    },
+    "composePort": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service", "target"],
+      "properties": {
+        "service": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        },
+        "target": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "healthCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["process", "tcp", "http", "compose"],
+          "x-stackpilot-capability": {
+            "compose": "phase2.compose"
+          }
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "port": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 65535
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{ports\\.[a-z][a-z0-9-]{0,62}\\}$"
+            }
+          ]
+        },
+        "timeout": {
+          "$ref": "#/$defs/duration",
+          "description": "Total readiness deadline; semantically defaults to spec.policies.startTimeout when omitted."
+        },
+        "interval": {
+          "$ref": "#/$defs/duration",
+          "default": "2s"
+        },
+        "successThreshold": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 1
+        },
+        "failureThreshold": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "http"
+              }
+            }
+          },
+          "then": {
+            "required": ["url"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "tcp"
+              }
+            }
+          },
+          "then": {
+            "required": ["host", "port"]
+          }
+        }
+      ]
+    },
+    "stop": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gracefulTimeout": {
+          "$ref": "#/$defs/duration",
+          "default": "15s"
+        }
+      },
+      "default": {}
+    },
+    "restart": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policy": {
+          "type": "string",
+          "enum": ["never", "on-failure", "always"],
+          "default": "never",
+          "x-stackpilot-capability": {
+            "on-failure": "phase2.auto-restart",
+            "always": "phase2.auto-restart"
+          }
+        },
+        "initialBackoff": {
+          "$ref": "#/$defs/duration",
+          "default": "1s"
+        },
+        "maxBackoff": {
+          "$ref": "#/$defs/duration",
+          "default": "1m"
+        },
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 3
+        },
+        "stableWindow": {
+          "$ref": "#/$defs/duration",
+          "default": "5m"
+        }
+      },
+      "default": {}
+    }
+  }
+}

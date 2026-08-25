@@ -10,23 +10,12 @@ import (
 	"path"
 	"strings"
 	"time"
-
-	webassets "stackpilot/web"
 )
 
 // SPAHandler serves immutable frontend assets and route fallback responses.
 type SPAHandler struct {
 	assets fs.FS
 	index  []byte
-}
-
-// NewHandler constructs the HTTP handler from the compiled web distribution.
-func NewHandler() (http.Handler, error) {
-	assets, err := webassets.Dist()
-	if err != nil {
-		return nil, err
-	}
-	return NewSPAHandler(assets)
 }
 
 // NewSPAHandler constructs a frontend handler from the supplied asset filesystem.

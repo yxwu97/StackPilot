@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"stackpilot/internal/buildinfo"
+	"stackpilot/internal/cli"
 )
 
 func main() {
@@ -18,6 +19,12 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "internal-supervisor" {
+		return runInternalSupervisor(ctx, args[1:], stderr)
+	}
+	if len(args) > 0 && args[0] == "internal-user-task-run" {
+		return runInstalledUserTask(ctx, args[1:], stdout, stderr)
+	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		writeUsage(stdout)
 		return 0
@@ -29,6 +36,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	if args[0] == "server" {
 		return runServer(ctx, args[1:], stdout, stderr)
+	}
+	if args[0] == "service" {
+		return runService(ctx, args[1:], stdout, stderr)
+	}
+	if cli.IsCommand(args[0]) {
+		return cli.Run(ctx, args, stdout, stderr)
 	}
 
 	fmt.Fprintf(stderr, "unknown command %q\n", args[0])
@@ -46,6 +59,15 @@ func writeUsage(output io.Writer) {
 	fprintln(output, "")
 	fprintln(output, "Commands:")
 	fprintln(output, "  server   Start the local StackPilot control plane")
+	fprintln(output, "  service  Install and manage the current-user background process")
+	fprintln(output, "  open     Open an authenticated local Web console session")
+	fprintln(output, "  workspace add  Register a workspace")
+	fprintln(output, "  up       Start the current or selected system")
+	fprintln(output, "  down     Stop the current or selected system")
+	fprintln(output, "  status   Show current runtime status")
+	fprintln(output, "  logs     Read or follow service logs")
+	fprintln(output, "  wait     Wait for an Operation")
+	fprintln(output, "  secret   Set, inspect metadata, or delete a protected Secret")
 	fprintln(output, "  version  Print build version, commit, and timestamp")
 }
 

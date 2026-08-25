@@ -1,7 +1,7 @@
 # StackPilot 详细设计方案
 
-> 状态：评审修订稿
-> 日期：2026-08-17
+> 状态：Phase 2.1 实现基线
+> 日期：2026-08-19
 > 上游文档：[总体设计方案](./overall-design.md)
 > 交互基线：[Web 交互原型](./stackpilot-prototype.html)
 > 首发范围：Phase 0、Phase 1（Windows-first）；兼顾 Phase 2 扩展边界
@@ -46,13 +46,9 @@
 - Linux/macOS 的完整进程监管与正式运行承诺。
 - 删除 Compose 数据卷或自动修改业务源码。
 
-### 2.3 为 Phase 2 预留但不提前实现
+### 2.3 Phase 2 分阶段启用
 
-- `oneshot` 进程模式与 `completed` 依赖条件。
-- Docker Compose Driver。
-- Python venv Runner 的生产实现和 Secret Provider。
-- liveness、自动重启和事故规则诊断。
-- PMS、AIWS 接入。
+Phase 1 只预留 Phase 2 契约而不提供半实现路径。Phase 2A 至 Phase 2E 已依次启用 Secret Provider/注入、`oneshot`、`completed`、Windows Python venv Runner、Compose Driver、AIWS/PMS 正式接入、liveness、有限自动重启和事故规则诊断。运行时通过 `phase2.secret`、`phase2.oneshot`、`phase2.python-venv`、`phase2.compose`、`phase2.liveness`、`phase2.auto-restart` 和 `phase2.incidents` capability 明确公布已启用边界。
 
 预留的含义是领域模型、接口枚举和数据库迁移可兼容，不是 Phase 1 创建空包或不可验证的占位实现。
 
@@ -155,7 +151,7 @@ Windows 上另有每个活动 SystemInstance 一个的内部 Supervisor 子进�
 
 ### 5.1 数据目录
 
-数据根目录记为 `DATA_DIR`，Windows 用户级默认值为 `%LOCALAPPDATA%\StackPilot`，系统服务模式默认值为 `%ProgramData%\StackPilot`。Phase 1 支持通过服务端参数 `--data-dir` 覆盖，路径在启动时转为绝对规范路径。
+数据根目录记为 `DATA_DIR`。根据 ADR-0003，Phase 1 只提供当前用户后台进程模式，通过 HKCU 登录启动注册激活，默认值为 `%LOCALAPPDATA%\StackPilot`；安装文件位于独立的 `%LOCALAPPDATA%\Programs\StackPilot`。不可变版本保存为 `versions/<sha256>/stackpilot.exe`，严格 `installation.json` marker 记录当前版本、规范安装/数据根、注册名、端口、安装 ID 和 SHA-256。升级先暂存新版本，再原子切换 marker 与 HKCU 注册；失败时恢复旧版本和原运行状态。自卸载只删除经 marker 与 canonical path 双重验证的安装根，独立数据根和业务工作区始终保留。Phase 1 支持通过服务端参数 `--data-dir` 覆盖，路径在启动时转为绝对规范路径。未来 Windows Service 的 `%ProgramData%\StackPilot` 数据目录和用户数据迁移必须通过新的安全决策启用，不属于 Phase 1。
 
 ```text
 DATA_DIR/
@@ -209,13 +205,19 @@ security:
 
 配置优先级为：命令行参数、允许的环境变量、`config.yaml`、内置默认值。安全边界字段如 `allowRemote` 不允许由被管理系统清单覆盖。未知配置字段启动时报错，避免拼写错误被静默忽略。
 
+### 5.3 产品版本与构建身份
+
+仓库根 `VERSION` 是 StackPilot 产品版本的唯一源码事实来源，使用无前导零的 `MAJOR.MINOR.PATCH` 三段数字。一次准备交付或合并的产品变更集默认通过 `scripts/version.ps1 -Action Bump` 自动计算 PATCH +1；普通 build、check、测试和重复 CI 只读取版本，禁止隐式递增或改写 Git 历史。`prompt/`、`plan/`、历史 evidence 和生成物不单独触发产品版本变更。
+
+构建脚本和 GoReleaser 把 `VERSION` 注入 `internal/buildinfo.Version`，commit 与 UTC build time 作为独立构建身份注入。运行中二进制不读取源码 `VERSION`；CLI `stackpilot version` 和根 `GET /version` 都只返回当前 exe 内编译的同一 buildinfo。正式 release tag 必须精确为 `v<VERSION>`，tag、归档名和归档内 exe 不一致时发布失败。产品版本与 API version、清单 apiVersion、migration version、Secret version 和 Supervisor protocol version 相互独立。
+
 ## 6. 核心领域对象
 
 ### 6.1 标识与时间
 
 - `systemId`、`serviceId`：清单内稳定、小写 kebab-case，正则为 `^[a-z][a-z0-9-]{0,62}$`。
-- `workspaceId`：注册时生成 ULID，对用户展示可附别名。
-- `instanceId`、`operationId`、`incidentId`：带类型前缀的 ULID，如 `op_01...`。
+- `workspaceId`：注册时生成带 `ws_` 前缀的 ULID，对用户展示可附别名。
+- `instanceId`、`operationId`、`incidentId`：分别使用 `si_`、`op_`、`inc_` 前缀的 ULID。
 - `eventId`：SQLite 自增 64 位整数，用作 SSE `id`。
 - 所有持久化时间为 UTC RFC 3339 纳秒字符串；前端按浏览器时区显示。
 - 运行时耗时使用单调时钟计算，持久化 `started_at`、`finished_at` 和最终 `duration_ms`。
@@ -227,6 +229,8 @@ security:
 1. `SystemDefinition`：清单解析后的声明，保留模板，不含机器相关解析结果。
 2. `ResolvedSystemSpec`：一次启动操作的不可变快照，包含绝对路径、Runner 解析结果、端口计划、展开后的非敏感环境变量和健康检查地址。
 3. `SystemInstance`/`ServiceInstance`：实际运行身份和观测状态。
+
+`internal/domain` 类型不携带 JSON、YAML 或 SQL 标签。API DTO、清单结构和持久化模型必须在各自边界显式映射，避免外部契约反向污染领域对象。
 
 定义刷新不影响已经运行的实例。运行中的实例继续引用启动时 `manifestDigest` 和 `resolvedSpecDigest`；新定义只对下一次启动或显式重启生效。界面需要显示“运行实例使用旧清单”。
 
@@ -251,6 +255,10 @@ type ProcessIdentity struct {
     PlatformToken  string // Supervisor/Job identity; opaque outside platform package
 }
 ```
+
+`ServiceInstance` additionally persists its resolved `processMode`. This value is part of the immutable launch snapshot used during recovery; reconciliation must not infer daemon/oneshot semantics from a subsequently refreshed manifest.
+
+运行时持久标识采用 ULID 前缀：SystemInstance 为 `si_`，ServiceInstance 为 `svi_`。两者与清单中的稳定 `serviceId` 分离，避免多次启动复用同一运行身份。
 
 `unknown` 只用于恢复核对期间无法确认实际身份的实例。它不是正常启动路径中的状态，也不能满足任何依赖。
 
@@ -281,7 +289,7 @@ type ProcessIdentity struct {
 
 ### 7.1 文件发现与注册
 
-工作区根目录必须包含 `.stackpilot/system.yaml`。注册流程：
+工作区运行定义仍必须落在 `.stackpilot/system.yaml`。已有清单的注册流程：
 
 1. 将输入路径解析为绝对路径，解析符号链接/目录联接后的真实路径。
 2. 验证目录存在且当前服务账号可读。
@@ -292,6 +300,12 @@ type ProcessIdentity struct {
 7. 在事务中写入 workspace、system 和 service 摘要及最后成功快照。
 
 刷新失败时保留上一次成功快照，但将 `manifest_status` 标为 `invalid` 并记录错误。新启动被拒绝；已运行实例不被自动停止。
+
+首次接入缺少固定清单时使用 ADR-0007 定义的导入流程：只读探测返回
+`initialization_required`，BAT 子集分析产生有证据和确认状态的结构化草案，持久化的
+规范路径作用域 Operation 在文件写入前建立。应用只通过强类型 Manifest、Schema、
+语义和 capability 校验生成固定清单；BAT 不成为运行入口。预注册 Operation 使用独立
+表保持现有运行期 Operation 的 workspace/system 非空外键不变量。
 
 ### 7.2 顶层结构
 
@@ -373,6 +387,10 @@ services:
       gracefulTimeout: 15s
     restart:
       policy: never
+      initialBackoff: 1s
+      maxBackoff: 1m
+      maxAttempts: 3
+      stableWindow: 5m
 ```
 
 | 字段 | 规则 |
@@ -386,6 +404,11 @@ services:
 | `dependsOn` | key 必须引用同一清单服务，禁止自依赖和环 |
 | `readiness` | daemon 必填；oneshot 禁止配置 readiness |
 | `liveness` | Phase 2 可选；语法与 readiness 相同 |
+| `restart` | Phase 2E 仅允许 daemon 使用；默认 `never`，自动重启必须使用有限次数和有界退避 |
+
+readiness/liveness 省略 `timeout` 时语义上继承 `spec.policies.startTimeout`，省略 `interval` 时使用 `2s`。这些语义默认值不写回规范化清单，避免仅因默认字段 materialize 而改变既有清单摘要；Resolved Spec 必须持久化展开后的具体时长。
+
+`restart.policy` 支持 `never/on-failure/always`。`on-failure` 在进程异常退出、身份丢失或 liveness 进入 degraded 时触发；`always` 还覆盖 daemon 的正常退出。第 N 次尝试等待 `min(initialBackoff * 2^(N-1), maxBackoff)`，`maxAttempts` 是同一连续故障序列允许创建的内部 `service-restart` Operation 数。服务连续 ready 达到 `stableWindow` 后清零尝试计数。默认值分别为 `never/1s/1m/3/5m`；`initialBackoff` 范围 100ms-1m，`maxBackoff` 不小于初始值且不超过 10m，`stableWindow` 不小于 `maxBackoff` 且不超过 24h。达到上限后停止重启并创建 Incident；自动重启 Operation 仍服从工作区活动 Operation 唯一性、乐观并发和审计规则。
 
 服务依赖对象写法为：
 
@@ -394,7 +417,20 @@ dependsOn:
   backend: ready
 ```
 
-Phase 1 只接受 `ready`。Schema 可以声明 `completed` 枚举，但功能开关未启用时注册包含 `oneshot/completed` 的清单必须返回明确的 `FEATURE_NOT_ENABLED`，不能注册后在启动期才失败。
+Phase 1 只接受 `ready`；P2A-04/P2A-05 已依次启用 `oneshot` 与 `completed`。`completed` 只能引用上游 `oneshot` 服务，`ready` 只能引用上游 `daemon` 服务，非法组合必须在注册时拒绝，不能延迟到启动期失败。未启用这些 capability 的构建仍须返回明确的 `FEATURE_NOT_ENABLED`。
+
+TCP readiness 使用显式本机目标，避免把健康检查变成任意网络探测入口：
+
+```yaml
+readiness:
+  type: tcp
+  host: 127.0.0.1
+  port: "${ports.backend}"
+  timeout: 180s
+  interval: 2s
+```
+
+`host` 必填且仅允许 loopback；`port` 必填，可使用已声明逻辑端口的完整模板，或使用 1024 至 65535 的固定整数。HTTP readiness 继续使用必填 `url`，注册时解析替换后的 URL 并执行相同的 loopback 限制。
 
 ### 7.6 Runner 解析
 
@@ -414,16 +450,23 @@ type ResolvedCommand struct {
 }
 ```
 
-解析顺序：清单显式且允许的工具路径、工作区工具、服务账号 PATH。各 Runner 的启用阶段如下：
+解析顺序：服务端受信任配置中的显式工具路径、工作区工具、服务账号 PATH。Phase 1 清单和 Web/API 不提供工具路径字段；若部署配置显式指定工具，路径必须位于工作区或服务端配置的允许根目录内。各 Runner 的启用阶段如下：
 
 | Runner | Windows 解析 | 最低校验 | 启用阶段 |
 |---|---|---|---|
 | `maven` | Maven Wrapper `mvnw.cmd`，否则 `mvn.cmd` | `--version` 可执行 | Phase 1 |
 | `npm` | `node_modules/.bin` 不直接作为 npm；解析 `npm.cmd` | `--version` 可执行 | Phase 1 |
 | `java` | `JAVA_HOME/bin/java.exe`，否则 PATH | `-version` 可执行 | Phase 1 |
+| `go` | 服务端显式允许路径，否则 PATH 中 `go.exe` | `go version` 且输出符合 `go<version> windows/amd64` | AgentHub 集成专项 |
 | `python-venv` | `<virtualEnvironment>/Scripts/python.exe` | 路径位于工作区，`--version` 可执行 | Phase 2A |
 
-Phase 1 的 Schema 可以识别 `python-venv`，但注册包含该 Runner 的清单时返回 `FEATURE_NOT_ENABLED`。Phase 2A 完成生产解析、路径和版本测试后才启用，避免把未验证 Runner 延迟到启动期失败。
+P2A-06 已启用 Windows `python-venv`。`virtualEnvironment` 只允许且必须用于该 Runner；它是工作区相对目录，注册时 join、canonicalize 并验证符号链接/junction 后仍位于真实工作区内。启动预检重复边界验证，只解析固定的 `<virtualEnvironment>/Scripts/python.exe`，不搜索 PATH、不调用 activation 脚本，也不回退到全局 Python。解析结果使用 `venv` resolution kind，执行固定 `--version`、解析 `Python <version>` 并记录可执行文件 SHA-256；缺失、越界和版本失败继续映射既有稳定 Runner 错误码。
+
+`go` 使用内部 capability gate `go`，对外公布 `workspace.runner.go`。它不搜索工作区
+脚本或 wrapper，不调用 shell，也不接受清单/API 提供工具路径。解析器只选择服务端配置
+允许根内的显式普通文件或服务账号 PATH 中的规范化 `go.exe`，通过固定 `go version`
+探针后记录版本与 SHA-256。服务参数仍来自已登记清单数组；`go run` 的代码执行授权等同于
+用户显式登记并启动该工作区，不扩展远程 API 命令面。
 
 `.cmd` Runner 由平台适配器使用系统命令解释器执行，但 HTTP 请求和用户输入不能控制解释器参数。最终命令摘要记录可执行路径和参数散列，不记录 Secret 展开值。
 
@@ -439,7 +482,7 @@ Phase 1 的 Schema 可以识别 `python-venv`，但注册包含该 Runner 的清
 
 禁止任意环境变量读取、函数、条件、文件包含和命令替换。模板在 YAML 解析后按字符串值处理，不对 key 展开。未定义引用、循环引用和 Secret 用于非环境字段均为校验错误。
 
-`${secret.<name>}` 是为 Phase 2 保留的受限语法。Phase 1 注册包含 Secret 引用的清单时返回 `FEATURE_NOT_ENABLED`，不创建 Secret 存储或半实现的运行路径。Phase 2 启用后，展开分两步：先形成可持久化的非敏感 `ResolvedSystemSpec`，再在进程创建前把 Secret 注入独立的内存环境数组；日志和错误信息始终使用带占位符的安全版本。
+`${secret.<name>}` 是 Phase 2 的受限语法，只允许作为一个环境变量的完整值，例如 `DATABASE_PASSWORD: "${secret.database-password}"`；前后拼接、参数/路径/readiness 使用和非法名称均在注册时拒绝。展开分两步：先形成只含占位符和 `environmentName -> secretName` 引用的可持久化 `ResolvedSystemSpec`，再在进程创建前解析并注入一次性内存环境。注入值必须是 UTF-8、无 NUL/CR/LF 且不超过 16 KiB；Provider 仍可保存最多 64 KiB 的非进程用途值。日志、错误和 DTO 始终使用安全引用或脱敏标记。
 
 ### 7.8 语义校验清单
 
@@ -533,7 +576,7 @@ sequenceDiagram
 详细步骤：
 
 1. 从最后成功清单快照创建本次解析上下文，拒绝 invalid/stale workspace。
-2. 获取工作区锁；若实例已经 Running 且请求规格相同，返回幂等成功 Operation，不重复创建进程。
+2. 获取工作区锁；若实例已经 Running/Degraded 且请求清单摘要相同，创建成功的幂等 Operation，所有步骤记为 `skipped`，保留原 SystemInstance，且不重新执行已 Completed 的 oneshot。若有效清单已变化则返回 `MANIFEST_CHANGED`；若存在其他非终止实例则返回 `OPERATION_INVALID_STATE`。显式系统重启不适用此跳过规则。
 3. 执行所有 Runner、目录、权限和能力预检。预检必须在任何业务进程创建前完成。
 4. 构建 DAG，计算拓扑层、下游闭包和逆拓扑顺序。
 5. 规划全部端口并写入 `reserved` 租约。
@@ -542,7 +585,7 @@ sequenceDiagram
 8. 同一拓扑层中的可运行服务通过有界并发组启动。
 9. Driver 返回身份后，事务写入 ServiceInstance 和状态事件，再开始 readiness。
 10. readiness 成功后把服务置为 `ready` 并激活下游；失败时按失败策略冻结未启动下游。
-11. 所有必需服务 ready 后写入粘性端口历史，将 Operation 置为 `succeeded`。
+11. 所有必需 daemon 服务 ready、所有必需 oneshot 服务 completed 后写入粘性端口历史，将 Operation 置为 `succeeded`；没有端口声明时端口计划为空且跳过租约与粘性历史写入。
 12. 失败时记录第一个主错误和所有并发子错误；按策略执行补偿，再结束 Operation。
 
 ### 8.5 失败策略精确定义
@@ -632,6 +675,7 @@ Supervisor 生命周期规则：
 
 - Server 正常退出或崩溃时继续运行，业务进程不受影响。
 - 新 Server 核验 Supervisor PID/创建时间后重新连接，并逐项核对服务身份。
+- 安装模式升级后，新 Server 与旧 Supervisor 的可执行路径必然不同。跨版本控制连接仅在 Windows 账号相同、候选位于旧 Supervisor 同一安装根的直接 `versions/<sha256>/stackpilot.exe` 路径、严格 `installation.json` 当前选中该路径且文件真实 SHA-256 同时匹配 marker 与目录名时允许；非安装模式继续要求精确可执行路径。
 - Supervisor 在恢复服务主线程前先原子写入 `identity.json`，Server 随后持久化数据库状态，以覆盖“进程已创建但 Server 尚未提交”的崩溃窗口。
 - 所有服务停止后，Supervisor 响应 `shutdown-if-empty` 并退出。
 - Supervisor 异常退出时 Job Object 的 kill-on-close 终止服务树；Server 恢复时将实例标记 failed 并记录 `SUPERVISOR_EXITED`。
@@ -671,6 +715,8 @@ spool 文件按实例保留，tail offset 定期写入 segment 元数据。重�
 
 不能只终止 Maven/npm 父进程；测试必须验证 Java/Node 子进程和孙进程均退出。
 
+`oneshot` 由同一 Supervisor 和独立 Job Object 监管。Orchestrator 在 `startTimeout` 内轮询经身份核验的 Supervisor 状态；主进程退出后先确认或清空整个 Job、排空 stdout/stderr 管道并关闭日志捕获，再提交终态。退出码 `0` 进入 `completed`，非零进入 `failed` 并持久化退出码；超时强制终止完整 Job，取消沿标准补偿路径进入 `stopped`。`completed` 清除活动进程身份，后续 stop 只迁移状态而不发送进程信号。
+
 ## 10. 健康检查引擎
 
 ### 10.1 检查接口
@@ -705,7 +751,7 @@ HTTP 默认只接受 200-299，不跟随跨主机重定向，响应体上限 64 
 
 ### 10.4 Liveness 与抖动控制
 
-Phase 2 启用 liveness。Ready 后连续 `failureThreshold` 次失败进入 degraded，连续 `successThreshold` 次成功恢复 ready。状态变化才写持久事件；每次检查写入有界 `health_results`，后台按“最近 N 条 + 小时聚合”清理，避免无限增长。
+Phase 2 启用 liveness。Ready 后连续 `failureThreshold` 次失败进入 degraded，连续 `successThreshold` 次成功恢复 ready；单次相反结果会清零当前连续计数。每个服务最多存在一个由控制面持有的 liveness monitor，monitor 随运行实例结束、服务停止或控制面退出而取消。状态变化通过 `state_version` 乐观并发校验，并与领域事件在同一事务提交；每次检查写入有界 `health_results`。后台保留每个实例最近 1000 条和最近 24 小时明细，较旧数据按小时写入聚合后小批量清理，避免无限增长。
 
 ## 11. 端口规划器
 
@@ -721,7 +767,7 @@ Phase 2 启用 liveness。Ready 后连续 `failureThreshold` 次失败进入 deg
   "workspaceId": "ws_01...",
   "assignments": {
     "backend": {"port": 8081, "source": "preferred", "replaced": false},
-    "web": {"port": 5201, "source": "fallback", "replaced": true, "conflictPort": 5173}
+    "web": {"port": 32201, "source": "fallback", "replaced": true, "conflictPort": 32102}
   },
   "expiresAt": "2026-08-17T08:30:00Z"
 }
@@ -768,27 +814,62 @@ SQLite 无法独占 OS 端口，因此采用数据库租约与绑定探测双重
 
 ### 12.1 运行时文件
 
-Compose 服务声明引用工作区内 compose 文件。StackPilot 在 `runtime/operations/<op>/` 生成 `compose.override.yml`，只包含：
+Compose 服务使用独立的驱动分支，不复用 Process Runner 或参数入口：
+
+```yaml
+infrastructure:
+  driver: compose
+  mode: daemon
+  compose:
+    file: ./infrastructure/compose.yaml
+    services: [postgres, keycloak, minio]
+    buildPolicy: never
+    readiness:
+      postgres: healthy
+      keycloak: healthy
+      minio: healthy
+    ports:
+      postgres:
+        service: postgres
+        target: 5432
+    environment:
+      postgres:
+        POSTGRES_PORT: "${ports.postgres}"
+  readiness:
+    type: compose
+```
+
+`compose.file` 是工作区相对普通文件，注册时必须 join、canonicalize 并验证符号链接/junction 后仍位于真实工作区内。`compose.services` 为非空、唯一且有界的 Compose service 名称列表。Compose 分支只支持 daemon 和 `readiness.type: compose`，禁止携带 `runner`、`virtualEnvironment`、`workingDirectory` 或 `arguments`，从而不形成任意命令入口。`compose.buildPolicy` 为闭合的 `never|always`，语义默认值为 `never`；`always` 额外要求 `compose-build` validator gate，对外能力名为 `phase2.compose-build`。`compose.readiness` 必须覆盖全部受管 Compose service，值仅允许 `healthy|running`；省略时保持历史上的全 `healthy` 语义。
+
+StackPilot 在 `runtime/operations/<op>/` 生成 `compose.override.yml`。`compose.ports` 将已声明逻辑端口映射到固定 Compose service 和容器目标端口；`compose.environment` 只允许为已声明 service 设置非 Secret 模板值。生成内容只包含：
 
 - 宿主机端口映射覆盖。
 - 必要的非敏感环境覆盖。
 - StackPilot 实例标签。
 
-原 compose 文件不修改。生成文件写入后重新解析并验证，不允许通过 override 添加特权模式、宿主根目录挂载或任意额外命令。
+原 compose 文件不修改。端口统一使用 long syntax，将规划后的宿主端口绑定到 `127.0.0.1`，协议固定为 TCP。生成文件先写入同目录临时文件、flush 后原子发布；同一 Operation 重试必须得到相同内容，已有不同内容返回 `COMPOSE_OVERRIDE_CONFLICT`。发布前后均校验 canonical 数据目录边界，写入后以 `KnownFields` 严格重解析并比对结构；非法请求或产物返回 `COMPOSE_OVERRIDE_INVALID`，不允许通过 override 添加特权模式、宿主根目录挂载、Secret 或任意额外命令。
 
 ### 12.2 项目标识
 
-项目名为 `sp-<system-id>-<workspace-short>-<instance-short>`，满足 Compose 字符限制。所有容器增加标签：`stackpilot.system`、`stackpilot.workspace`、`stackpilot.instance`、`stackpilot.service`。
+项目名为 `sp-<system-id>-<workspace-short>-<instance-short>`：两个 runtime short ID 均取去除前缀后的前 8 个 ULID 字符并转小写；若完整名称超过 63 字符，system ID 部分截断并附加原 system ID 的 SHA-256 前 10 个十六进制字符。该算法确定、满足 Compose 字符限制并降低截断碰撞风险。所有容器增加标签：`stackpilot.system`、`stackpilot.workspace`、`stackpilot.instance`、`stackpilot.service`。持久项目身份同时包含项目名、三个领域 ID、canonical 工作区/数据目录、两个 Compose 文件、排序后的受管服务、build policy、排序后的 build services、逐服务 readiness、启动/停止超时和定义摘要；观察、构建或停止前必须重新核验摘要、路径边界及 override 标签。旧身份缺少启动超时时按历史默认值恢复，且因该字段使用省略式编码而保持旧 token 摘要兼容。
 
 ### 12.3 调用与停止
 
-- 预检：`docker version`、`docker compose version`、daemon 可用性和文件解析。
-- 启动：`docker compose ... up -d --wait`，超时由服务配置决定。
+- 预检：Windows 解析 canonical `docker.exe`，最低支持 Docker CLI/Server `24.0.0` 与 Compose v2 `2.20.0`。固定命令依次检查 `docker --version`、`docker compose version --format json`、`docker version --format {{json .}}`，再从 Compose 文件目录执行 `docker compose --file <canonical-file> config --format json --no-interpolate`。若 CLI 与 Compose 插件可用但 daemon 不可达，预检仅从 `%ProgramFiles%\Docker\Docker\Docker Desktop.exe` 或 `%LOCALAPPDATA%\Programs\Docker\Docker\Docker Desktop.exe` 中解析 canonical 普通文件，以当前用户、无参数、脱离控制台方式启动 Docker Desktop，并串行化并发启动尝试后轮询 daemon；非 Compose 路径不触发该行为。每条命令通过参数数组直接创建进程，禁止 shell 和 HTTP 命令入口；包含 Docker Desktop 冷启动的总预检 deadline 默认 2 分钟，轮询间隔默认 500 毫秒，stdout/stderr 各自最多 4 MiB。受信工作区基础 Compose 文件可以包含固定容器 `command`，但不得覆盖 `entrypoint`、使用特权模式/宿主根目录挂载或依赖未声明服务；运行时 override 仍禁止添加 `build`、`command` 或 `entrypoint`，详见 ADR-0005、ADR-0006 和 ADR-0008。
+- 受控 build：只有 `buildPolicy: always` 可使用工作区内本地 context 与默认或工作区内 Dockerfile；远程/Git context、越界路径、args、Secret、SSH、target、network、entitlements、cache 和其他高级 build 字段全部拒绝。context/Dockerfile 在导入和 Start 预检时均重新 canonicalize。config JSON 只在内存中解析；结果仅保留 Docker/Compose 版本、排序后的受管服务/build 服务和逐服务 readiness，不持久化完整 config 或 stderr。
+- 预检和构建错误稳定区分 `DOCKER_NOT_FOUND`、`DOCKER_VERSION_UNSUPPORTED`、`COMPOSE_NOT_FOUND`、`COMPOSE_VERSION_UNSUPPORTED`、`DOCKER_DAEMON_UNAVAILABLE`、`COMPOSE_CONFIG_INVALID`、`COMPOSE_BUILD_CONFIG_INVALID`、`COMPOSE_BUILD_FAILED`、`COMPOSE_BUILD_TIMEOUT` 和 `COMPOSE_PREFLIGHT_TIMEOUT`。
+- 启动：显式系统 Start/Restart 在 policy 为 `always` 时先固定执行 `docker compose ... build <sorted-build-services...>`；成功后固定执行 `docker compose ... up -d --wait --no-deps --no-build --wait-timeout <seconds> <sorted-services...>`。build 失败、超时或取消不得进入 up。用户或自动 `service-restart` 一律跳过 build；所有依赖服务必须显式列入 `compose.services`，不得由 Compose 隐式带起未受管服务。
 - 观察：优先使用 `docker compose ps --format json` 的结构化输出。
-- 日志：`docker compose logs --no-color --timestamps --follow`，转换为统一日志事件。
-- 停止：`docker compose stop`；普通停止禁止 `down -v`。
+- 日志：`docker compose logs --no-color --timestamps --follow <declared-services...>` 通过固定无 shell 子进程持续写入数据目录内两个受控 spool；既有 Log Manager 负责尾随、行边界、脱敏、sequence、NDJSON segment、SQLite 索引和 SSE 发布。spool 创建前后必须核验 canonical 数据目录边界，follow 会话取消时终止 Docker 子进程并 flush 文件。
+- 停止：用户发起的 Stop/Restart 在 Compose 停止阶段复用受控预检，因此 daemon 未运行时会按 ADR-0006 拉起 Docker Desktop。若持久化 `compose_project_token` 为空，则在停止前使用 resolved spec 和严格的 system/workspace/instance 标签发现项目；发现成功时将 opaque 身份与 `stopping` 状态在同一事务提交，再执行 `docker compose stop`。严格标签下项目确实不存在时直接收敛为 `stopped`；发现失败、身份不匹配或 daemon 失败不得伪造已停止。普通停止禁止 `down -v`。
 
 Compose 命令的 stdout/stderr 也进入 OperationStep 日志，但需区分工具日志和容器服务日志。
+
+生命周期调用使用固定参数数组且不经过 shell，stdout/stderr 各自有界。`ps` 同时兼容 Compose v2 的 JSON array 和早期 NDJSON 输出，只接受匹配项目名及已声明 service 的容器。普通停止固定使用 `docker compose ... stop --timeout <seconds> <declared-services...>`，不得调用 `down` 或删除 volume。生命周期错误稳定区分 `COMPOSE_LIFECYCLE_INVALID`、`COMPOSE_LIFECYCLE_TIMEOUT`、`COMPOSE_START_FAILED`、`COMPOSE_INSPECT_FAILED`、`COMPOSE_STOP_FAILED`、`COMPOSE_PROJECT_IDENTITY_MISMATCH` 和 `COMPOSE_PROJECT_NOT_FOUND`。
+
+Compose readiness 复用结构化项目观察并逐服务执行：`healthy` 要求容器为 `running` 且 Docker health 为 `healthy`；`running` 只要求严格身份下容器为 `running`，且仅允许 Compose config 确实没有 healthcheck 的服务使用。已有 healthcheck 不得降级为 `running`。starting/unhealthy、容器退出、项目缺失或观察失败均产生 `CONTAINER_UNHEALTHY`。项目身份以严格、带定义摘要的 opaque token 交给 Health Engine；Engine 沿用 success/failure threshold、取消和 timeout，并把每次 `kind=compose` 结果写入 `health_results`。现有表无需迁移，`000013_compose_health_results.sql` 的闭合集合已经能承载这些结果。
+
+恢复时优先严格解码持久项目身份并重新执行结构化观察。若发生容器创建后、数据库身份提交前的崩溃窗口，则固定以 `stackpilot.system/workspace/instance` 三个 label filter 执行 `docker ps --all --quiet --no-trunc`，容器数量上限 64；随后对只包含十六进制完整 ID 的集合执行一次有界 `docker inspect`。完整 inspect 仅在内存解析，不得进入日志、SQLite、Operation、DTO 或错误；重建前必须逐容器核对三个 StackPilot 身份标签、`stackpilot.service`、`com.docker.compose.project` 和 `com.docker.compose.service`。运行态恢复仅在状态允许时将身份与 `waiting_ready` 原子提交；用户停止失败态现场时将发现身份与 `stopping` 原子提交。恢复日志 follow 使用上次持久时间戳作为 `--since`，Log Manager 再按 spool offset/sequence 去重续写。
 
 ## 13. 日志子系统
 
@@ -908,7 +989,7 @@ data: {...single-line JSON...}
 | `manifest_snapshots` | `digest`, `system_id`, `api_version`, `normalized_yaml`, `parsed_json`, `created_at` | PK `digest`; 内容不含 Secret 值 |
 | `services` | `workspace_id`, `service_id`, `driver`, `mode`, `required`, `definition_digest` | PK `(workspace_id, service_id)` |
 | `system_instances` | `id`, `workspace_id`, `manifest_digest`, `resolved_spec_digest`, `state`, `started_at`, `stopped_at`, `last_reconciled_at` | partial index on active workspace |
-| `service_instances` | `id`, `system_instance_id`, `service_id`, `state`, `pid`, `process_started_at`, `executable_path`, `command_digest`, `exit_code`, `state_version` | unique `(system_instance_id, service_id)` |
+| `service_instances` | `id`, `system_instance_id`, `service_id`, `driver`, `process_mode`, `state`, process identity columns, `compose_project_token`, `exit_code`, `graceful_timeout_ms`, `state_version` | unique `(system_instance_id, service_id)`; process and Compose identities remain separate |
 | `operations` | `id`, `workspace_id`, `type`, `state`, `idempotency_key`, `request_digest`, `error_code`, timestamps | partial unique active workspace; idempotency unique |
 | `operation_steps` | `operation_id`, `step_no`, `step_key`, `state`, `attempt`, timestamps, `error_code`, `detail_ref` | PK `(operation_id, step_no)` |
 | `port_leases` | `id`, `workspace_id`, `instance_id`, `operation_id`, `logical_name`, `protocol`, `host`, `port`, `state`, `expires_at` | partial unique `(protocol, host, port)` for active leases |
@@ -916,6 +997,10 @@ data: {...single-line JSON...}
 | `log_segments` | `id`, `service_instance_id`, `stream`, `path`, seq/time bounds, `size_bytes`, `closed_at` | unique path; index instance/sequence |
 | `events` | `id`, `event_type`, scope ids, `payload_json`, `occurred_at` | PK autoincrement; indexes on operation/system/time |
 | `auth_tokens` | `id`, `token_hash`, `created_at`, `last_used_at`, `revoked_at` | 不保存明文 |
+| `auth_token_rotation` | `token_id`, `token_hash`, `created_at` | 单例 pending journal；不保存明文 |
+| `audit_events` | `id`, `subject_type`, `action`, `target_type`, `target_id`, `result`, `trace_id`, `operation_id`, `client_type`, `error_code`, `occurred_at` | 单调 cursor；不保存请求体或凭据 |
+| `secret_metadata` | `system_id`, `name`, `provider`, `version`, `updated_at` | Secret 值的非敏感投影；不保存明文/密文/digest |
+| `service_instance_secret_versions` | `service_instance_id`, `environment_name`, `system_id`, `name`, `provider`, `version`, `resolved_at` | 实例启动版本投影；版本禁止回退；不保存值 |
 
 Phase 1 migration 不创建事故分析或 Secret 空表。对应功能启用时再通过独立 migration 增加：
 
@@ -923,7 +1008,7 @@ Phase 1 migration 不创建事故分析或 Secret 空表。对应功能启用时
 |---|---|---|
 | Phase 2 规则诊断 | `incidents` | `id`, `service_instance_id`, `kind`, `severity`, `state`, window, `fingerprint` |
 | Phase 2 规则诊断 | `incident_analyses` | `id`, `incident_id`, `engine`, `schema_version`, `result_json`, `created_at` |
-| Phase 2 Secret | `secret_metadata` | `system_id`, `name`, `provider`, `version`, `updated_at` |
+| Phase 2 Secret | `secret_metadata`, `service_instance_secret_versions` | Provider 元数据与实例实际使用版本；均不保存值 |
 
 ### 15.3 乐观并发
 
@@ -993,8 +1078,8 @@ Phase 1 每 10 秒检查受管进程身份，每 30 秒核对活动租约；周�
 {
   "error": {
     "code": "PORT_CONFLICT",
-    "message": "端口 5173 已被占用，且当前策略不允许替换。",
-    "details": {"logicalPort": "web", "port": 5173},
+    "message": "端口 32102 已被占用，且当前策略不允许替换。",
+    "details": {"logicalPort": "web", "port": 32102},
     "operationId": "op_01...",
     "traceId": "tr_01..."
   }
@@ -1060,7 +1145,7 @@ Operation：
 ```json
 {
   "workspaceId": "ws_01...",
-  "portOverrides": {"backend": 8081, "web": 5201},
+  "portOverrides": {"backend": 8081, "web": 32201},
   "failurePolicy": {
     "failFast": true,
     "cleanupOnFailure": false,
@@ -1100,13 +1185,13 @@ Operation：
 | `GET /workspaces` | 工作区和清单状态 |
 | `DELETE /workspaces/{id}` | 仅无活动实例/Operation 时解除注册；不删除项目文件 |
 
-解除注册属于管理操作，需二次确认。它只删除 StackPilot 注册信息和无引用缓存，不触碰工作区内容。
+解除注册属于管理操作，需二次确认。服务端在同一数据库写事务内确认无活动实例、生命周期 Operation 或工作区导入/编辑 Operation；冲突返回 `WORKSPACE_UNREGISTER_RUNTIME_ACTIVE`。成功后删除该工作区的历史控制面记录、注册信息和无引用缓存，不触碰工作区内容。
 
 ### 17.8 服务可用性接口
 
 - `GET /health/live`：进程存活，不检查数据库写入。
 - `GET /health/ready`：migration 完成、数据库可写、首次 reconciliation 完成。
-- `GET /version`：版本、commit、build time、API version 和启用能力。
+- `GET /version`：返回当前运行 exe 的三段产品版本、commit、build time、API version 和启用能力；Web 将其中 `version` 显示为“系统版本”，不读取前端 package version 或静态构建常量。
 
 ## 18. 认证、安全与审计
 
@@ -1114,7 +1199,21 @@ Operation：
 
 首次启动生成 256 bit 随机令牌，明文只写入 OS 安全存储，SQLite 保存带随机 salt 的 Argon2id 摘要。CLI 从安全存储读取并发送 `Authorization: Bearer`。
 
-Web 使用短期 HttpOnly、SameSite=Strict 会话 cookie：`stackpilot open` 把一次性 bootstrap code 放在 URL fragment，前端交换会话后立即清除 fragment。普通 API 不接受 query token。会话创建接口仅监听回环地址，并校验 Origin。
+Web 使用短期 HttpOnly、SameSite=Strict 会话 cookie：`stackpilot open` 先以 CLI Bearer 请求 60 秒单次有效 bootstrap code，再把 code 放在 URL fragment；前端读取后立即用 `history.replaceState` 清除 fragment，并同源交换会话。会话采用 30 分钟滑动续期和 8 小时绝对上限，`GET /api/v1/auth/session` 在服务端同一原子临界区续期、轮换 CSRF 并更新 Cookie；页面刷新可依靠有效 Cookie 恢复仅存内存的 CSRF。bootstrap 只在 Server 内存保存摘要，浏览器只收到独立且与会话绑定的 CSRF 值。普通 API 不接受 query token。会话创建接口仅监听回环地址，并精确校验 Origin。具体决策见 ADR-0002。
+
+会话的 `renewalExpiresAt` 和 `absoluteExpiresAt` 都以 UTC 服务端时钟判定，恰好到期即无效。续期结果是 `min(now + 30m, absoluteExpiresAt)`，任何过期、撤销、服务重启或令牌轮换后的会话都不能刷新复活。Cookie 的 `Expires`、`Max-Age` 与响应 `expiresAt` 使用 AuthManager 返回的同一时钟结果，不在 API 层另取系统时间。
+
+服务端只保留当前 CSRF 摘要和一个前代摘要；前代最多宽限 5 分钟且不越过会话期限，用于收口刷新完成前已发送的 mutation。前端单标签刷新为单飞，刷新期间阻止新的 mutation 取得 header；已发送请求不重放。多标签通过同源 Web Lock 串行化 bootstrap/refresh，并用不持久化的 `BroadcastChannel` 发布新的 `csrf/expiresAt`；等待锁的标签收到新凭据后跳过重复刷新。REST 或 SSE 返回 `401 AUTH_SESSION_INVALID` 时发布同一类型化失效事件，幂等清除 CSRF、续期 timer、领域流和日志流，并要求重新执行 `stackpilot open`。其他 `4xx/5xx` 不进入会话失效状态。
+
+### 17.9 Secret 接口（Phase 2A）
+
+- `PUT /api/v1/secrets/{systemId}/{secretName}`：请求 JSON 的 `value` 使用 base64 byte 编码，边界解码后立即交给 Provider 并清零；响应只返回 metadata。
+- `GET /api/v1/secrets/{systemId}/{secretName}`：只返回 `id/systemId/name/provider/version/updatedAt`，不存在返回 `SECRET_NOT_FOUND`。
+- `DELETE /api/v1/secrets/{systemId}/{secretName}`：删除值和 metadata projection，响应仅回显被删除的 metadata 以供同步审计定位。
+
+不存在返回 Secret 明文的 HTTP/CLI 接口。浏览器 PUT/DELETE 仍执行精确 Origin、CSRF 和 JSON Content-Type 校验；CLI 使用 Bearer。mutation audit 的 target 是 `system/name`，request body 和 value 不进入 audit capture。
+
+令牌轮换通过 pending hash journal 协调 SQLite 与 DPAPI 原子文件替换：先持久化 pending hash，再替换安全存储，最后在单个 SQLite 事务中撤销旧 hash、激活新 hash 并清除 journal。启动恢复时，安全存储匹配 pending hash 则完成提交，仍匹配 active hash 则清除未开始 journal，二者均不匹配则拒绝启动。轮换成功后所有 browser bootstrap 和 session 立即失效。
 
 ### 18.2 CSRF 与本地恶意网页
 
@@ -1130,25 +1229,32 @@ CLI Bearer 请求不使用 cookie，但仍受令牌认证和命令边界约束�
 ### 18.3 路径安全
 
 - 所有清单相对路径先 join，再 canonicalize，再验证位于工作区根内。
+- Windows canonicalize 必须通过已打开文件/目录句柄取得最终 DOS 路径，覆盖 junction；不得仅依赖字符串清理或 `filepath.EvalSymlinks`。
 - 拒绝通过 `..`、符号链接、junction 或大小写差异逃逸。
 - 输出文件只允许位于 DATA_DIR 的固定子目录。
 - 删除前同时验证数据库登记路径、canonical path 前缀和文件类型。
 
 ### 18.4 Secret Provider（Phase 2）
 
-Phase 1 不实现 Secret Provider，也不创建 `secret_metadata` 表；包含 Secret 引用的清单在注册时返回 `FEATURE_NOT_ENABLED`。BTC 首个接入不依赖此能力。
+Phase 1 不实现 Secret Provider；P2A-01 至 P2A-03 已依次启用 Provider、管理接口和受控进程注入。BTC 首个接入不依赖此能力。
 
-Phase 2 启用后，统一接口只暴露 `Set`、`Resolve`、`Metadata`、`Delete`。Windows 实现优先使用 Credential Manager；若选用 DPAPI 文件，必须绑定当前用户/机器范围并限制 ACL。
+Phase 2 启用后，统一接口只暴露 `Set`、`Resolve`、`Metadata`、`Delete`。ADR-0004 已关闭 D-12：Windows 使用当前用户范围 DPAPI 文件，固定目录为 canonical `DATA_DIR/secrets`，目录和文件 DACL 仅允许当前用户与 SYSTEM。Secret key 的 system/name 均使用 `^[a-z][a-z0-9-]{0,62}$`，值长度为 1–65536 bytes，文件名只使用 key 的 SHA-256，不使用用户输入路径片段。
 
-Secret 只在进程创建前解析，使用版本号写入实例元数据。任何 DTO 的环境变量只返回 key 和 `secretRef`，不返回 resolved value。
+加密记录是 Secret 值的事实来源，包含 schema、key、单调 version 与 UTC `updatedAt`；SQLite `secret_metadata` 只是无明文投影。写入先原子替换 DPAPI 文件，再推进元数据；读取时用受保护记录补齐缺失或较旧投影，确定文件不存在时删除陈旧投影。元数据版本禁止回退。删除前必须重新计算 hash 路径、验证 canonical 边界和普通文件类型。崩溃窗口、威胁边界和 Credential Manager 取舍以 ADR-0004 为准。
+
+Secret 只在进程创建前解析，实际 provider/version 与环境变量名写入 `service_instance_secret_versions`。`Resolve` 返回调用方拥有的临时 byte buffer；控制面在 Driver 调用后清空解析 buffer、注入 map 和日志会话输入副本。任何 DTO 只可返回 key/`secretRef` 或省略环境，不返回 resolved value。
+
+Process Driver 只把 Secret 环境变量名作为私有协议标记传给 Supervisor。Supervisor 从一次性环境 map 取得对应值，通过匿名管道接收子进程 stdout/stderr，并在写入原始 spool 前执行跨读取边界的精确值替换；Log Manager 在 NDJSON/SSE 边界再次执行同一实例的精确值脱敏。值不进入 identity、Operation、resolved spec、SQLite 日志或安全错误。控制面恢复日志捕获时重新解析当前值并与实例记录版本比较；版本已变化或缺失时返回 `SECRET_VERSION_CONFLICT`，拒绝在无法证明脱敏值正确的情况下恢复捕获。
 
 ### 18.5 审计事件
 
 Phase 1 记录工作区注册/删除、清单刷新、系统/服务启停、取消、令牌轮换和高风险失败。Phase 2 增加 Secret 元数据变更。字段包括主体类型、动作、目标、结果、traceId、operationId、时间和客户端类型；不记录令牌、Secret 和完整命令。
 
+审计查询使用 `GET /api/v1/audit-events` 的单调整数 cursor 和有界 page；`202` 变更响应记录为 `accepted`，不得伪装为 Operation 最终成功。同步成功、边界失败和已认证浏览器的 Origin/CSRF 拒绝分别记录为 `succeeded`、`failed` 和 `denied`。异步 Operation 的最终状态仍由同事务领域事件提供事实来源，并通过审计记录中的 `operationId` 关联。
+
 ## 19. 事故与规则诊断（Phase 2）
 
-本章固定 Phase 2 的扩展边界，不属于 Phase 1 实现清单。Phase 1 不创建事故表、事故目录、诊断包或相关 API；功能启用时再增加 migration 和实现，避免空模块占位。
+本章固定 Phase 2E 已启用的事故边界；它不属于 Phase 1 实现清单。Migration 15 已增加事故、规则分析、健康聚合和重启尝试表，服务端通过 `phase2.incidents` capability 公布能力。事故内容仍受预算和脱敏约束，不生成可执行诊断包。
 
 ### 19.1 事故触发
 
@@ -1177,7 +1283,7 @@ type DiagnosticRule interface {
 
 首批规则：端口已占用、进程异常退出、readiness 连接拒绝、HTTP 状态异常、依赖未就绪、已知 Java/Node/Python 启动错误。规则结果按证据特异性和置信度排序，同一证据不重复生成相同建议。
 
-所有建议默认 `automatic=false`。原型中的“重新执行 readiness”属于只读低风险检查，可以创建独立 diagnose Operation，但不能隐式重启服务。
+所有建议默认 `automatic=false`。`POST /api/v1/incidents/{incidentId}/analyze` 返回 `202` 并创建持久化、可幂等恢复的 `analyze` Operation；该 Operation 只重新读取有界健康、事件和脱敏日志证据并运行确定性规则，不调用 restart、命令执行或文件修改路径。分析失败使用 Operation 领域码 `INCIDENT_ANALYSIS_FAILED`，达到自动重启上限的 Incident 使用触发码 `RESTART_LIMIT_REACHED`。
 
 ## 20. Web 控制台详细设计
 
@@ -1214,6 +1320,7 @@ Phase 1 路由：
 - SSE 断开显示非阻塞连接状态并指数退避重连；超过保留窗口后重新拉 REST 快照。
 - 按钮可用性由服务端能力字段和活动 Operation 决定，不能只按视觉状态推断。
 - 页面离开不取消 Operation；Operation 属于服务端持久任务。
+- 系统版本通过独立的只读 `GET /version` 加载并显示在侧边栏控制面状态附近；加载失败只显示未知占位，不阻断认证、REST 快照或领域 SSE。
 
 ### 20.3 系统总览
 
@@ -1361,7 +1468,7 @@ StackPilot 自身使用结构化 `slog`，字段至少包括 `trace_id`、`opera
 ### 24.6 Web 端到端测试
 
 1. 添加 BTC 工作区并看到有效清单。
-2. 打开启动确认，5173 冲突时显示替代端口。
+2. 打开启动确认，32102 冲突时显示替代端口。
 3. Backend 未 ready 前 Web 保持 waiting dependency。
 4. Operation 时间线随 SSE 更新，成功后入口可点击。
 5. 服务详情持续接收、筛选、暂停和下载日志。
@@ -1384,7 +1491,7 @@ StackPilot 自身使用结构化 `slog`，字段至少包括 `trace_id`、`opera
 | 服务 | Runner | 端口 | 依赖 | Readiness |
 |---|---|---:|---|---|
 | `backend` | Maven | preferred 8081，fallback 8200-8399 | 无 | `/actuator/health` HTTP 2xx |
-| `web` | npm | preferred 5173，fallback 5200-5299 | backend ready | Web 根路径 HTTP 2xx |
+| `web` | npm | preferred 32102，fallback 32200-32399 | backend ready | Web 根路径 HTTP 2xx |
 
 ### 25.2 业务项目一次性改造要求
 
@@ -1392,13 +1499,13 @@ StackPilot 自身使用结构化 `slog`，字段至少包括 `trace_id`、`opera
 - Vite 启动端口从 Runner 参数接收，不能被配置文件硬编码覆盖。
 - Vite proxy 读取 `VITE_API_TARGET`。
 - Backend health endpoint 不依赖需要较长初始化的非关键外部系统，或明确返回可解释状态。
-- CORS 允许来源由规划后的 Web 地址注入，不能只写死 5173。
+- CORS 允许来源由规划后的 Web 地址注入，不能只写死 32102。
 
 ### 25.3 验收证据
 
 - BTC 清单 Schema 和语义校验报告。
 - 启动 Operation 的步骤、耗时和最终 resolved spec 摘要。
-- 8081/5173 被占用时的端口计划及传播断言。
+- 8081/32102 被占用时的端口计划及传播断言。
 - Backend -> Web 的 readiness 时序记录。
 - 停止前后进程树快照和端口释放结果。
 - StackPilot 重启前后的同一实例身份和日志 sequence 连续性。
@@ -1452,7 +1559,7 @@ StackPilot 自身使用结构化 `slog`，字段至少包括 `trace_id`、`opera
 
 ### 26.6 Phase 2
 
-按顺序启用 Secret Provider、Python venv Runner、oneshot/completed、Compose Driver、AIWS、PMS、liveness/自动重启、事故规则诊断。每项使用 capability flag 交付，未完成能力不接受对应清单。
+Phase 2A 至 Phase 2E 已启用 Secret Provider、oneshot/completed、Windows Python venv Runner、Compose Driver、AIWS、PMS、liveness、有限自动重启和事故规则诊断。Phase 2.1 三系统 Gate、Phase 2.0 数据库升级到 Migration 15、规则故障 Gate 和事故中心浏览器验收均已通过；能力继续由 capability flag 明确公布，未公布能力不接受对应清单。
 
 ## 27. 验收追踪矩阵
 
@@ -1474,14 +1581,14 @@ StackPilot 自身使用结构化 `slog`，字段至少包括 `trace_id`、`opera
 以下事项不阻塞工程基线，但必须在对应纵切面开发前确认：
 
 1. BTC Backend 的实际 readiness 路径、响应约定及健康端点是否需要认证。
-2. BTC Vite 当前端口和 proxy 配置读取方式，5173/5175 的历史不一致以哪份实际配置为准。
-3. Windows 首发采用用户级常驻进程还是 Windows Service；两者决定默认数据目录和 Secret 保护范围。
+2. BTC Vite 当前端口和 proxy 配置读取方式已统一以清单解析后的端口为准。
+3. Windows 首发后台模式已由 ADR-0003 确认为带 HKCU 登录启动注册和自有控制通道的当前用户进程；Windows Service 和用户数据迁移延后到跨平台后台服务阶段。
 4. Windows Supervisor 的 Named Pipe ACL、Server 崩溃接管和 Supervisor 崩溃 kill-on-close 行为需要在 Phase 1B 前完成技术验证。
-5. 前端首次认证采用 `stackpilot open` bootstrap，还是安装器创建本机浏览器会话；必须避免 URL query token。
+5. 前端首次认证已由 ADR-0002 确认为 `stackpilot open` 一次性 fragment bootstrap，不采用安装器隐式创建会话，也不使用 URL query token。
 
-第 4 项技术验证结论应形成 ADR；若 Windows 实测行为与本文假设不符，必须先更新监管架构，不得退化为仅凭 PID 终止进程。
+第 3 项后台模式决策见 ADR-0003，第 4 项技术验证结论见 ADR-0001，第 5 项 Web bootstrap 决策见 ADR-0002。若 Windows 实测行为与本文假设不符，必须先更新监管架构，不得退化为仅凭 PID 终止进程。
 
-已确认的范围决策：Phase 1 只保留 Python venv Runner 接口和 capability gate，生产实现归入 Phase 2A；该项不再作为待确认事项。
+已确认的范围决策：Phase 1 只保留 Python venv Runner 接口和 capability gate，生产实现归入 Phase 2A；P2A-06 已完成该实现与真实 Windows venv 验证。
 
 ## 29. 完成定义
 
@@ -1493,3 +1600,32 @@ StackPilot 自身使用结构化 `slog`，字段至少包括 `trace_id`、`opera
 - Windows 进程树、端口冲突、SSE 重连和控制面恢复通过集成测试。
 - BTC 主流程通过 Web 和 CLI 两条入口验证，最终状态一致。
 - 相关设计变更同步更新总体设计、详细设计、OpenAPI、Schema 和验收记录。
+
+## 30. 工作区导入与管理专项
+
+固定清单缺失时，`POST /api/v1/workspaces/probe` 返回正常状态 `initialization_required` 和有界 BAT 候选，不再把首次接入强制终止在 `WORKSPACE_MANIFEST_UNAVAILABLE`。分析器只读取工作区内的规则文件，支持受控变量、目录、嵌套 BAT 引用及 Maven/npm/Java/Node 工具命令；固定 BAT -> PS1 -> Compose 来源图只额外接受紧随已识别 Compose 调用的三行 `$LASTEXITCODE` 失败保护块，块内只能包含单个受限字面量 `throw`。引用图有深度、文件数、字节数和循环限制。其他 PowerShell 变量或脚本块、危险 shell、下载、管道、注册表操作和非回环服务形成阻断项，BAT 与 PowerShell 永不执行。
+
+导入草案保存证据、置信度、来源图摘要和确定性 Manifest 预览。API 使用显式 DTO，不返回 BAT 全文、内部 Manifest 对象或服务环境。结构化修正只允许系统名称/描述、服务显示名和已发现端口。Node 由受信任 `node.exe` Runner 直接监管；Cocos 候选仅展示并保持 `workspace.runner.cocos` capability 阻断。
+
+首次应用、结构化编辑和重关联使用 `workspace_import_operations` 的路径级数据库锁与幂等索引。首次导入采用同目录暂存、flush、原子发布再注册；编辑同时核验 base digest 与磁盘当前 digest；重关联在应用时重新验证新路径清单、相同 System ID、停止状态和无活动 Operation，仅原子更新控制面登记，不修改或删除旧路径文件。详细决策见 ADR-0007，机器契约以 OpenAPI、Schema 和 migration 16 为准。
+
+## 31. AgentHub 声明式接入专项
+
+AgentHub 通过已登记的 `.stackpilot/system.yaml` 管理一套完整系统，不执行其历史 BAT 或
+PowerShell 启动器。`infrastructure` 是 Compose daemon，显式列出 PostgreSQL、Redis、
+RabbitMQ、对象存储和 KMS，并要求每个容器 `healthy`；依赖与 API 端口为严格 loopback，
+托管 Redis 固定使用 6380 以避免复用或停止系统 Redis；Web 优先 5173 并在冲突时使用
+5174-5199，以保持 GNMarket 等并行工作区可运行。
+
+`bootstrap` 是 Go oneshot，只在基础设施 ready 后运行。AgentHub 自有 bootstrap 负责规范化
+并限制配置路径位于仓库内、校验 migration 注册表和 SHA-256、幂等应用 migration/fixture、
+协调本地应用角色及内容密钥。它直接连接声明端口，不调用 Docker、PowerShell、BAT 或通用
+shell。API 和 Worker 等待 `bootstrap: completed`；Web 等待 npm install completed、API ready
+和 Worker ready。启动失败保持真实 Operation/step 状态，普通 Stop 逆拓扑停止进程与 Compose
+容器但不删除命名卷。
+
+专项能力组合为 `phase2.compose`、`phase2.oneshot` 与 `workspace.runner.go`；AgentHub 当前
+Compose 文件没有本地 build，因此不要求 `phase2.compose-build`。验收必须覆盖清单加载与语义
+校验、Runner 解析、Compose config、bootstrap 空库与重复运行、API/Worker/Web readiness、
+完整 Stop 后端口/进程释放以及命名卷保留。任何绕过 `WORKSPACE_SCRIPT_DANGEROUS`、新增 shell
+Runner、执行脚本或普通停止删除 volume 的方案均不属于该专项。

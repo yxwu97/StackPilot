@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
+    "test": "node --test --test-isolation=none test/stream.test.ts test/session.test.ts test/version.test.ts test/log-viewer-model.test.ts",
     "type-check": "vue-tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
     "preview": "vite preview --host 127.0.0.1"
   },

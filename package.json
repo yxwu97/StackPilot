@@ -9,7 +9,12 @@
     "dev": "npm run dev --workspace @stackpilot/web",
     "build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1",
     "build:web": "npm run build --workspace @stackpilot/web",
+    "test:web": "npm run test --workspace @stackpilot/web",
     "type-check": "npm run type-check --workspace @stackpilot/web",
+    "version:show": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/version.ps1 -Action Show",
+    "version:bump": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/version.ps1 -Action Bump",
+    "version:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/version.ps1 -Action Check",
+    "test:version": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-version.ps1",
     "check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1"
   },
   "engines": {

@@ -1,0 +1,43 @@
+version: 2
+
+project_name: stackpilot
+
+before:
+  hooks:
+    - npm run build:web
+
+builds:
+  - id: stackpilot-windows
+    main: ./cmd/stackpilot
+    binary: stackpilot
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+    goarch:
+      - amd64
+    flags:
+      - -trimpath
+    ldflags:
+      - >-
+        -s -w
+        -X stackpilot/internal/buildinfo.Version={{ .Env.STACKPILOT_VERSION }}
+        -X stackpilot/internal/buildinfo.Commit={{ .Commit }}
+        -X stackpilot/internal/buildinfo.BuildTime={{ .Date }}
+
+archives:
+  - id: stackpilot-windows-zip
+    ids:
+      - stackpilot-windows
+    formats:
+      - zip
+    name_template: "{{ .ProjectName }}_{{ .Env.STACKPILOT_VERSION }}_windows_{{ .Arch }}"
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  disable: true

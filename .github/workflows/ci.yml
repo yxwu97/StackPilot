@@ -1,0 +1,151 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Windows quality gates
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install Web dependencies
+        run: npm ci
+      - name: Check product version
+        shell: pwsh
+        env:
+          STACKPILOT_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if ($env:STACKPILOT_BASE_REF -and $env:STACKPILOT_BASE_REF -notmatch '^0+$') {
+            ./scripts/version.ps1 -Action Check -BaseRef $env:STACKPILOT_BASE_REF
+          } else {
+            ./scripts/version.ps1 -Action Check
+          }
+          ./scripts/test-version.ps1
+      - name: Check Go formatting
+        shell: pwsh
+        run: |
+          go fmt ./...
+          if (-not (git diff --quiet -- '*.go')) {
+            git diff -- '*.go'
+            throw 'Go source is not formatted.'
+          }
+      - name: Check Web types
+        run: npm run type-check
+      - name: Build Web console
+        run: npm run build:web
+      - name: Run Go tests
+        run: go test ./...
+      - name: Run Go vet
+        run: go vet ./...
+
+  cross-compile:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }} core
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        goos:
+          - linux
+          - darwin
+        goarch:
+          - amd64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Cross-compile public core
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build ./...
+          go build -trimpath -o dist/stackpilot-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/stackpilot
+
+  windows-artifact:
+    name: Build Windows artifact
+    needs:
+      - quality
+      - cross-compile
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install Web dependencies
+        run: npm ci
+      - name: Resolve product version
+        shell: pwsh
+        run: |
+          $version = ./scripts/version.ps1 -Action Show
+          "STACKPILOT_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build GoReleaser snapshot
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: v2.12.7
+          args: release --snapshot --clean
+        env:
+          STACKPILOT_VERSION: ${{ env.STACKPILOT_VERSION }}
+      - name: Verify release archive and checksum
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem -LiteralPath dist -Filter "stackpilot_$env:STACKPILOT_VERSION`_windows_amd64.zip"
+          if ($archive.Count -ne 1) { throw 'Expected exactly one Windows amd64 release archive.' }
+          if (-not (Test-Path -LiteralPath dist/checksums.txt -PathType Leaf)) { throw 'Missing GoReleaser checksums.txt.' }
+          $extract = Join-Path $env:RUNNER_TEMP 'stackpilot-version-check'
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $extract
+          $reported = & (Join-Path $extract 'stackpilot.exe') version
+          if ($LASTEXITCODE -ne 0 -or @($reported)[0] -ne "StackPilot $env:STACKPILOT_VERSION") {
+            throw 'Release archive executable version does not match VERSION.'
+          }
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stackpilot-windows-amd64
+          path: |
+            dist/stackpilot_*_windows_amd64.zip
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 14

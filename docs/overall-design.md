@@ -215,6 +215,8 @@ stateDiagram-v2
 
 每个项目根目录保存 `.stackpilot/system.yaml`，路径全部相对工作区。该文件是系统定义的唯一事实来源，清单必须包含 `apiVersion`，并通过 JSON Schema 校验。SQLite 只保存清单路径、内容摘要、最后成功解析快照和运行状态，不作为可编辑的第二份系统定义。注册/刷新操作的语义是读取并校验文件后更新缓存；Web 和 API 不直接编辑数据库中的服务定义。
 
+首次接入可通过受控导入生成该文件：控制面只读分析工作区内 BAT、固定 `-File` 引用的受限 PowerShell 和直接引用的 Compose/Dockerfile 来源图，用户确认结构化服务、端口、依赖、逐服务 readiness 和本地 build opt-in 后，由持久化 Operation 原子发布并重新加载清单。导入不执行 BAT/PowerShell，不提供 raw command/YAML 编辑入口；详细边界与恢复协议见 ADR-0007 和 ADR-0008。
+
 ```yaml
 apiVersion: stackpilot.io/v1alpha1
 kind: System
@@ -237,8 +239,8 @@ spec:
       conflictPolicy: auto
     web:
       protocol: tcp
-      preferred: 5173
-      fallbackRange: 5100-5199
+      preferred: 32102
+      fallbackRange: 32400-32599
       conflictPolicy: auto
 
   services:
@@ -264,8 +266,6 @@ spec:
       arguments: [-m, app.main]
       environment:
         RAG_PORT: "${ports.rag}"
-      dependsOn:
-        backend: ready
       readiness:
         type: http
         url: "http://127.0.0.1:${ports.rag}/health"
@@ -297,11 +297,15 @@ spec:
 |---|---|---|
 | `maven` | `mvn.cmd` | `mvn` |
 | `npm` | `npm.cmd` | `npm` |
+| `go` | `go.exe` | `go` |
 | `python-venv` | `.venv/Scripts/python.exe` | `.venv/bin/python` |
 | `java` | `java.exe` | `java` |
 | `docker-compose` | `docker.exe compose` | `docker compose` |
 
 Runner 在预检阶段解析实际可执行文件、版本和路径。解析失败时操作在创建任何业务进程前终止。
+`go` 仅表示受信工具链 Runner：Windows 从服务端显式允许路径或服务账号
+`PATH` 解析规范化的 `go.exe`，执行固定 `go version` 探针并记录摘要；清单只提供
+参数数组，HTTP/API 不接受可执行路径、shell 或启动命令字符串。
 
 ## 9. 启停编排
 
@@ -354,17 +358,22 @@ Docker Compose 是可选驱动，仅用于适合容器化的基础设施或已�
 - AIWS：PostgreSQL、Keycloak、MinIO、ClamAV、Qdrant、OpenTelemetry Collector。
 - PMS/BTC：未来需要隔离的数据库、Redis 或其他中间件。
 
-StackPilot 调用官方 Compose v2：
+StackPilot 调用官方 Compose v2。普通 Compose 不构建；显式启用 `phase2.compose-build` 且清单声明 `buildPolicy: always` 时，系统 Start/Restart 先运行独立 build，再运行固定的无隐式构建 up：
 
 ```text
 docker compose \
   --project-name <instance-name> \
   --file compose.yml \
   --file <runtime>/compose.override.yml \
-  up -d --wait
+  build <sorted-build-services>
+docker compose \
+  --project-name <instance-name> \
+  --file compose.yml \
+  --file <runtime>/compose.override.yml \
+  up -d --wait --no-deps --no-build --wait-timeout <seconds> <sorted-services>
 ```
 
-`compose.override.yml` 由端口规划器生成，只覆盖宿主机端口和必要环境变量，不改写项目原文件。Compose 内部容器端口通常保持固定，只动态调整宿主机映射。Compose 项目名必须包含系统和实例标识，避免多个工作区发生容器名、网络名或数据卷名冲突。
+`compose.override.yml` 由端口规划器生成，只覆盖宿主机端口、必要环境变量和身份标签，不改写项目原文件，也不注入 build/command/entrypoint。受控 build 只允许工作区内本地 context/Dockerfile；远程 context、args、Secret、SSH、entitlements 和高级 build 字段拒绝。用户或自动 service-restart 不构建，普通 Stop 不删除 volume、镜像或 daemon cache。Compose 项目名必须包含系统和实例标识，避免多个工作区发生容器名、网络名或数据卷名冲突。
 
 没有 Docker 的机器仍可运行不依赖 Compose 的系统。只有清单包含 Compose 服务时，Docker 才是该系统的前置条件。
 
@@ -417,11 +426,11 @@ docker compose \
 
 | 系统 | 当前主要端口 | 建议备用范围 |
 |---|---|---|
-| PMS | Web 5173、Backend 8080、RAG 8100 | Web 5100-5199，服务 8000-8199 |
-| BTC | Web 5173、Backend 8081 | Web 5200-5299，服务 8200-8399 |
+| PMS | Web 32102、Backend 8080、RAG 8100 | Web 32400-32599，服务 8000-8199 |
+| BTC | Web 32102、Backend 8081 | Web 32200-32399，服务 8200-8399 |
 | AIWS | Web 6173、Server 18080、Runtime 18090 及多项基础设施端口 | Web 6100-6199，服务 18000-19199 |
 
-PMS 与 BTC 当前都使用 5173，StackPilot 必须在任何进程启动前解决该冲突。
+PMS 与 BTC 清单可声明相同的 Web preferred 端口 32102，StackPilot 必须在任何进程启动前解决该冲突。
 
 ## 12. 健康检查与监控
 
@@ -511,7 +520,7 @@ data/
 | `workspaces` | 系统在不同机器上的项目路径 |
 | `services` | 解析后的服务定义摘要 |
 | `system_instances` | 系统运行实例 |
-| `service_instances` | PID、容器ID、端口和运行状态 |
+| `service_instances` | driver、进程身份或 opaque Compose 项目身份、端口策略和运行状态 |
 | `operations` | 启停、重启、诊断操作 |
 | `operation_steps` | 操作步骤、耗时、错误和重试 |
 | `port_leases` | 端口租约及所属实例 |
@@ -741,8 +750,8 @@ Phase 2 的规则诊断和 Phase 4 的模型增强均为只读分析，不自动
 
 - 清单通过 `secret://<system>/<name>` 引用秘密，不保存明文。
 - 使用 `stackpilot secret set/get-metadata/delete` 管理；`set` 从交互输入或标准输入读取，不接受会进入 shell 历史的明文参数。
-- Windows-first 版本使用 Credential Manager 或 DPAPI 保护的数据文件；macOS 使用 Keychain；Linux 优先使用 Secret Service，显式配置后才允许使用权限为 `0600` 的本地受保护文件。
-- SQLite 只保存 Secret 名称、版本和更新时间，不保存值。
+- Windows-first 版本按 ADR-0004 使用当前用户 DPAPI 保护的数据文件和仅当前用户/SYSTEM 可访问的 DACL；macOS 使用 Keychain；Linux 优先使用 Secret Service，显式配置后才允许使用权限为 `0600` 的本地受保护文件。
+- SQLite 只保存 Secret system/name、provider、单调版本和更新时间，不保存值；受保护文件是值的事实来源，元数据是可对账投影。
 - Secret 仅在启动子进程前于内存中解析并注入其环境，使用后清理临时缓冲；不写入操作快照、SSE、日志或事故上下文。
 - 更新 Secret 不自动重启服务，界面明确标记哪些运行实例仍使用旧版本。
 
@@ -761,6 +770,7 @@ MVP 不开放远程监听。多用户、远程控制和多 Agent 获得明确需
 
 - 不提供 `/exec` 等任意命令接口。
 - runner 和参数来自已登记、已校验的清单。
+- 本地 Dockerfile 是独立的构建期执行信任面，必须同时由 `buildPolicy: always` 与 `phase2.compose-build` 显式开启；取消不承诺回滚 daemon cache。
 - 路径解析后必须处于注册工作区或平台运行目录内；显式允许的系统工具除外。
 - 停止操作在终止进程前重新核验进程身份。
 - 删除数据卷、日志或运行数据属于独立高风险操作，不与普通停止绑定。
@@ -775,11 +785,12 @@ MVP 不开放远程监听。多用户、远程控制和多 Agent 获得明确需
 
 ### 20.2 后台服务
 
-- Windows：Windows Service。
+- Windows Phase 1：带 HKCU 登录启动注册和 ACL 控制通道的当前用户后台进程，详见 ADR-0003。
+- Windows Service：在需要机器级启动和多用户身份模型时另行启用，不以 LocalSystem 静默运行用户项目。
 - Linux：systemd。
 - macOS：launchd。
 
-统一命令为 `stackpilot service install/start/stop/status/uninstall`，内部调用平台实现。
+统一命令为 `stackpilot service install/upgrade/start/stop/status/uninstall`，内部调用平台实现。Windows Phase 1 将不可变版本保存到 `%LOCALAPPDATA%/Programs/StackPilot/versions/<sha256>/stackpilot.exe`，由严格安装 marker 和 HKCU 注册选择当前版本；旧 Supervisor 仅接受同账号且由该 marker 和真实 SHA-256 共同证明的新版本控制面。卸载仅删除已验证安装根并保留 `%LOCALAPPDATA%/StackPilot` 数据根。
 
 ### 20.3 被管理项目的边界
 
@@ -802,7 +813,7 @@ capabilities:
     - docker-compose>=2
 ```
 
-## 21. PMS、AIWS、BTC 接入方案
+## 21. PMS、AIWS、BTC、AgentHub 接入方案
 
 ### 21.1 PMS
 
@@ -810,7 +821,7 @@ capabilities:
 |---|---|---:|---|
 | Backend | Process/Maven | 8080 | 注入 `SERVER_PORT`，增加 HTTP readiness |
 | RAG | Process/Python venv | 8100 | 注入 `RAG_PORT`，增加健康检查 |
-| Web | Process/npm | 5173 | Vite 监听端口和 API proxy 改为读取环境变量 |
+| Web | Process/npm | 32102 | Vite 监听端口和 API proxy 改为读取环境变量 |
 
 现有 BAT 中的端口检测、后端等待和浏览器打开迁入 StackPilot；固定 `timeout` 不保留。启动顺序初期保持现状语义，待验证业务依赖后再决定 Backend 与 RAG 是否可以并行或调整顺序。
 
@@ -831,9 +842,24 @@ AIWS 现有 PowerShell 启动脚本可作为迁移行为基线，但不再作为
 | 服务 | 驱动 | 已知端口 | 接入处理 |
 |---|---|---:|---|
 | Backend | Process/Maven | 8081 | 注入 `SERVER_PORT`，补充 readiness |
-| Web | Process/npm | 5173 | 改为 BTC 独立端口域，proxy 动态指向 Backend |
+| Web | Process/npm | 32102 | 使用 BTC 独立 fallback 端口域，proxy 动态指向 Backend |
 
-BTC 当前只有临时启动脚本，且脚本中的前端端口提示存在 5173/5175 不一致。接入时以实际 Vite 配置和 StackPilot 解析后的端口为唯一事实来源。
+BTC 的历史临时启动脚本与 Vite 配置曾存在端口提示不一致。接入后以 `.stackpilot/system.yaml` 和 StackPilot 解析后的端口为唯一事实来源。
+
+### 21.4 AgentHub
+
+| 服务 | 驱动 | 已知端口 | 接入处理 |
+|---|---|---:|---|
+| PostgreSQL/Redis/RabbitMQ/Object Storage/KMS | Compose | 5432、6380、5672/15672、9000/9001、8200 | 使用登记的 Compose include 与容器 healthcheck；6380 避免复用系统 Redis |
+| Database Bootstrap | Process/Go oneshot | - | 校验 migration checksum、幂等迁移/fixture、创建本地应用角色与内容密钥 |
+| API | Process/Go | 28080 | bootstrap completed 后启动，等待 `/health/ready` |
+| Worker | Process/Go | - | bootstrap completed 后启动，以 process readiness 管理 |
+| Web Install/Web | Process/npm oneshot/daemon | preferred 5173，fallback 5174-5199 | 安装完成且 API/Worker ready 后发布 Web readiness |
+
+AgentHub 的 BAT/PowerShell 启动器只作为历史人工入口，不进入受管生命周期，也不放宽
+`WORKSPACE_SCRIPT_DANGEROUS`。登记后的 `.stackpilot/system.yaml` 是完整拓扑事实来源；
+普通 Stop 使用 Compose stop 并保留命名卷。Go bootstrap 直接连接已 ready 的 loopback
+PostgreSQL，不调用 Docker、PowerShell 或 shell。详细信任边界见 ADR-0009。
 
 ## 22. 故障恢复与一致性
 
@@ -973,7 +999,7 @@ Windows 是首个稳定发布目标。Phase 0 对 Linux/macOS 只做公共核心
 
 ### 26.2 Phase 2 系统接入
 
-1. PMS 与 BTC 同时启动时，5173 冲突能自动解决，并尽量复用各工作区上次成功端口。
+1. PMS 与 BTC 同时启动时，Web preferred 端口冲突能自动解决，并尽量复用各工作区上次成功端口。
 2. PMS 的 Backend、RAG、Web 按真实 readiness 编排，不使用固定等待时间。
 3. AIWS Compose 基础设施可以通过 StackPilot 启停且不删除数据卷。
 4. Keycloak oneshot 只有退出码 0 才释放 Server/Web 下游依赖，失败现场可观察。
@@ -991,7 +1017,7 @@ Windows 是首个稳定发布目标。Phase 0 对 Linux/macOS 只做公共核心
 | StackPilot 重启后丢失 stdout pipe | 无法继续读取既有原生进程输出 | 服务日志优先重定向到持久文件；接管后恢复文件跟踪 |
 | 跨平台停止进程树语义不同 | 可能遗留子进程 | 平台适配层和各 OS 端到端测试 |
 | Windows-first 实现渗入公共核心 | 后续平台适配成本上升 | 平台接口隔离、Phase 0 多平台编译检查、禁止核心包引用 Windows API |
-| Docker Desktop 不可用或资源不足 | AIWS 基础设施无法启动 | 前置检查、明确错误、Compose 仅作为可选能力 |
+| Docker Desktop 未运行、不可用或资源不足 | AIWS 基础设施无法启动 | Compose 预检按 ADR-0006 受控拉起已安装的 Docker Desktop 并等待 daemon；启动失败或超时返回明确错误，Compose 仍为可选能力 |
 | 智能分析泄露敏感日志 | 安全风险 | 本地脱敏、最小上下文、Provider 权限和审计 |
 
 评审后已确认的首发决策：
@@ -1001,7 +1027,9 @@ Windows 是首个稳定发布目标。Phase 0 对 Linux/macOS 只做公共核心
 3. 自动端口默认启用粘性复用，优先保持同一工作区上次成功结果。
 4. 启动失败默认保留现场，只有显式停止或清理策略才回收已启动服务。
 5. Phase 2 先实现规则诊断，Phase 4 再接入可选本地或远程模型。
-6. 系统托盘不进入 MVP；后台服务安装命令保留，安装器按发布需要另行规划。
+6. 系统托盘不进入 MVP；Phase 1 使用 ADR-0003 定义的当前用户后台任务，安装器按发布需要另行规划，Windows Service 留待独立安全和迁移决策。
+7. 工作区首次接入先探测固定清单；缺少清单时可对 BAT 做只读、有界静态分析，由用户确认结构化草案后原子生成清单。BAT 永不作为运行入口。
+8. 已注册工作区支持详情、结构化编辑和同 System ID 路径重关联；编辑/重关联均要求停止状态、无活动 Operation，并通过持久化 Operation 应用。
 
 进入详细设计前仍需验证：
 

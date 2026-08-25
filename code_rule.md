@@ -94,6 +94,8 @@
 
 ## 10. 契约与文档同步表
 
+- `prompt/` 与 `plan/` 下的需求和开发计划使用同日同序号配对命名：`prompt-yyyyMMdd-XX-内容名称.md` 与 `plan-yyyyMMdd-XX-内容名称.md`，其中 `XX` 为当日两位递增序号。
+
 | 变更类型 | 同步内容 |
 | --- | --- |
 | REST/SSE | OpenAPI、DTO、错误码、客户端和契约测试 |

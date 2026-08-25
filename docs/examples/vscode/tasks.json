@@ -1,0 +1,37 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "StackPilot: Start Current System",
+      "type": "process",
+      "command": "stackpilot",
+      "args": ["up", "--wait", "--open"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "StackPilot: Stop Current System",
+      "type": "process",
+      "command": "stackpilot",
+      "args": ["down", "--wait"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "StackPilot: Current System Status",
+      "type": "process",
+      "command": "stackpilot",
+      "args": ["status"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "StackPilot: Open Web Console",
+      "type": "process",
+      "command": "stackpilot",
+      "args": ["open"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    }
+  ]
+}

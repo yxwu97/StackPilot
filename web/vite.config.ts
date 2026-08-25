@@ -33,6 +33,9 @@ export default defineConfig({
     port: developmentPort,
     strictPort: true,
     proxy: {
+      '^/version$': {
+        target: 'http://127.0.0.1:32100',
+      },
       '/api': {
         target: 'http://127.0.0.1:32100',
       },

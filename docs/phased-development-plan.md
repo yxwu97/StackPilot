@@ -1,7 +1,7 @@
 # StackPilot 总体分阶段开发计划
 
-> 状态：评审修订稿（AI-native）
-> 日期：2026-08-17
+> 状态：执行基线（Phase 2.1 已验收）
+> 日期：2026-08-19
 > 上游文档：[总体设计方案](./overall-design.md)
 > 实现基线：[详细设计方案](./detailed-design.md)
 > 交互基线：[Web 交互原型](./stackpilot-prototype.html)
@@ -166,13 +166,13 @@ proposed -> ready -> in-progress -> verification -> done
 
 | ID | 工作包 | 核心任务 | 依赖 | 交付物 |
 |---|---|---|---|---|
-| P0-01 | 仓库与构建 | Go module、前端工程、统一开发命令、版本信息注入 | 无 | 可构建空应用 |
+| P0-01 | 仓库与构建 | Go module、前端工程、统一开发命令、唯一产品版本源与版本信息注入 | 无 | 可构建空应用 |
 | P0-02 | Web 嵌入 | Vue 构建、Go embed、SPA fallback、开发代理 | P0-01 | 单二进制提供 Web 页面 |
 | P0-03 | 领域基线 | ID、时间、状态枚举、领域错误、DTO 边界 | P0-01 | `internal/domain` 与测试 |
 | P0-04 | API 与错误契约 | `/api/v1`、错误 envelope、health/version、OpenAPI 基座、错误码注册表 | P0-03 | 可验证 OpenAPI components 与错误码清单 |
 | P0-05 | 清单 Schema | v1alpha1 顶层、端口/服务基本字段、示例与校验测试 | P0-03 | Schema 与最小样例 |
 | P0-06 | SQLite 基线 | connection、PRAGMA、migration runner、repository 测试基座 | P0-01 | 空库升级测试 |
-| P0-07 | CI 质量门槛 | Go test/static check、Web type-check/build、Windows 制品、跨平台编译 | P0-01/P0-02 | 自动化流水线 |
+| P0-07 | CI 质量门槛 | 版本前进/tag 一致性、Go test/static check、Web type-check/build、Windows 制品、跨平台编译 | P0-01/P0-02 | 自动化流水线 |
 | P0-08 | Windows 监管 Spike | 验证 Job Object、Supervisor 脱离、Named Pipe 重连、kill-on-close | P0-01 | ADR 与可重复验证程序 |
 
 ### 5.5 Windows 监管 Spike 验证项
@@ -191,7 +191,8 @@ P0-08 必须给出实测结果，不只写理论说明：
 ### 5.6 测试与验收
 
 - 空数据目录首次启动成功，migration 可重复执行。
-- `/health/live`、`/health/ready` 和 `/version` 契约通过。
+- `/health/live`、`/health/ready` 和 `/version` 契约通过；CLI、API、Web 和 Windows 制品报告同一 `VERSION`。
+- 产品变更集的版本递增 Gate、版本回退、非法格式和错误 release tag 负向检查通过；重复 build/check/test 不修改版本。
 - Vue 静态资源从最终 Windows 二进制加载。
 - 清单有效/无效样例测试通过。
 - Windows 产物可运行；Linux/macOS 公共核心可交叉编译。
@@ -238,7 +239,7 @@ P0-08 未完成时允许开始 Phase 1A，也允许提前开展 P1B-01、P1B-02�
 
 - Backend readiness 路径、响应码、启动阶段语义和是否需要认证。
 - Backend 是否读取 `SERVER_PORT`。
-- Vite 实际监听端口来源，消除 5173/5175 不一致。
+- Vite 实际监听端口来源，统一为当前 BTC Web 基线并消除历史配置不一致。
 - Vite proxy 是否读取 `VITE_API_TARGET`。
 - 动态 Web 地址如何传播到 Backend CORS。
 
@@ -356,8 +357,8 @@ BTC Backend 和全部测试夹具通过单服务闭环；无遗留 Java/Maven �
 
 必须覆盖：
 
-1. 8081/5173 均可用时使用 preferred。
-2. 5173 被占用时从 5200–5299 分配替代端口。
+1. 8081/32102 均可用时使用 preferred。
+2. 32102 被占用时从 32200–32399 分配替代端口。
 3. 同一工作区重启优先复用 sticky 端口。
 4. API 显式 override 高于 sticky 和 preferred。
 5. strict/override-only 语义正确。
@@ -520,7 +521,7 @@ Secret 不出现在数据库明文、运行快照、日志、SSE 和错误中；
 | ID | 工作包 | 核心任务 | 依赖 | 交付物 |
 |---|---|---|---|---|
 | P2B-01 | Compose 清单 | driver schema、文件/服务引用、路径和 capability 校验 | P1A-03 | Schema 扩展 |
-| P2B-02 | Compose 预检 | Docker/Compose 版本、daemon、配置解析 | P2B-01 | Preflight |
+| P2B-02 | Compose 预检 | Docker/Compose 版本、daemon、受控 Docker Desktop 自动启动、配置解析 | P2B-01 | Preflight |
 | P2B-03 | Override 生成 | host ports、允许环境、标签、安全再解析 | P1C-03/P2B-01 | runtime override |
 | P2B-04 | Compose 生命周期 | project name、up --wait、inspect、stop | P2B-02/P2B-03 | Compose Driver |
 | P2B-05 | Compose 日志/健康 | logs follow、容器状态和 healthcheck | P2B-04/P1B-05 | 统一日志/健康 |
@@ -580,7 +581,7 @@ AIWS 不依赖原 PowerShell 启动入口；基础设施健康后才运行 Keycl
 | P2D-03 | RAG | venv、RAG_PORT、健康和长启动 | P2A-06 | 服务定义 |
 | P2D-04 | Web | npm、动态监听、proxy 和入口 | P1C | 服务定义 |
 | P2D-05 | DAG 验证 | 真实依赖、可并行层、失败策略 | P2D-02..04 | PMS 清单 |
-| P2D-06 | BTC/PMS 冲突 | 5173 冲突、sticky、同时启停与日志 | P2D-05 | 双系统 E2E |
+| P2D-06 | BTC/PMS 冲突 | Web preferred 端口冲突、sticky、同时启停与日志 | P2D-05 | 双系统 E2E |
 
 ### 15.3 退出条件
 
@@ -614,6 +615,8 @@ PMS 使用 readiness 而非固定延时；Backend、RAG、Web 的调用 URL 和�
 
 端口占用、进程异常退出、readiness 超时和已知日志错误都能生成可追溯诊断；规则分析不依赖模型；自动重启达到上限后停止并形成 Incident；任何建议默认不自动执行。
 
+执行状态（2026-08-19）：P2E-01 至 P2E-07 全部完成并验收，逐项证据见 `docs/evidence/p2e-01.md` 至 `p2e-07.md`，阶段汇总见 `docs/progress/phase-2e.md`。
+
 ## 17. Phase 2 发布 Gate
 
 ### 17.1 Phase 2.0 AIWS Gate
@@ -631,13 +634,15 @@ Phase 2.0 交付 Secret、oneshot/completed、Compose Driver 和 AIWS 闭环，�
 
 Phase 2.1 继承 Phase 2.0 全部 Gate，并补齐总体设计 26.2 的剩余验收：
 
-1. PMS 与 BTC 的 5173 冲突自动解决并 sticky 复用。
+1. PMS 与 BTC 的 Web preferred 端口冲突自动解决并 sticky 复用。
 2. PMS 三服务使用真实 readiness 编排。
 3. 规则诊断覆盖端口占用、进程异常退出、readiness 超时和已知日志错误，并引用可定位证据。
 4. Secret 仍不进入事故上下文，规则诊断不可执行自动高风险动作。
 5. BTC、AIWS、PMS 三系统回归通过，Phase 2E migration 可从 Phase 2.0 直接升级。
 
 Phase 2.1 Gate 通过后，才算完整满足总体设计 26.2 的六项验收。
+
+Gate 状态（2026-08-19）：已通过。BTC 安装/崩溃恢复/升级、AIWS Compose/oneshot/OIDC、PMS/BTC 双系统端口冲突三项真实 Gate 均使用当前 Phase 2E 候选完成；规则故障矩阵、Phase 2.0 -> Migration 15 升级和 Secret 边界回归通过。证据见 `docs/evidence/phase-2.1-gate.md`。
 
 ## 18. Phase 3：开发工具、多平台与可观测性
 
@@ -865,13 +870,13 @@ flowchart LR
 | D-03 | BTC Vite 端口/proxy/CORS | Phase 1C 前 | 端口传播 | 完成业务配置改造 |
 | D-04 | 用户进程或 Windows Service | Phase 1D 安装前 | 数据目录、权限、升级 | 发布 ADR |
 | D-05 | Web 首次认证 bootstrap | Phase 1D 前 | 本地安全和体验 | 安全评审 + 原型验证 |
-| D-06 | AIWS Keycloak 幂等 | Phase 2C 前 | oneshot 可靠性 | 重复/部分成功测试；未关闭时真实接入包 blocked，fixture/API 工作可继续 |
-| D-07 | PMS DAG 真实方向 | Phase 2D 前 | 启动顺序 | 业务依赖验证；未关闭时清单草案可继续，真实 E2E blocked |
+| D-06 | AIWS Keycloak 幂等 | Phase 2C 前 | oneshot 可靠性 | 已关闭：Python venv Configure 通过部分失败/重复单测，以及真实部分状态、重复执行和 Keycloak 26.2.5 -> 26.3.3 保卷升级测试 |
+| D-07 | PMS DAG 真实方向 | Phase 2D 前 | 启动顺序 | 已关闭：真实代码与 E2E 证明 Backend/RAG 为并行启动根，Web 等待二者 ready |
 | D-08 | Linux/macOS 优先级 | Phase 3 计划前 | 平台资源 | 使用范围与用户需求评审 |
 | D-09 | 模型 Provider 与数据边界 | Phase 4A 前 | 安全/成本 | 独立威胁模型与评估集 |
 | D-10 | 多 Agent 是否真实需要 | Phase 4B 前 | 架构复杂度 | 使用场景和容量证据 |
 | D-11 | Python venv Runner 所属阶段 | Phase 1B 前 | Phase 1 范围一致性 | 已关闭：Phase 1 仅保留接口/capability gate，生产实现归 P2A-06 |
-| D-12 | Windows Secret 存储选型 | Phase 2A 前 | Secret 生命周期和升级 | Credential Manager/DPAPI Spike + 安全 ADR |
+| D-12 | Windows Secret 存储选型 | Phase 2A 前 | Secret 生命周期和升级 | 已关闭：ADR-0004 选择当前用户 DPAPI 文件、受限 DACL 与可对账 metadata projection |
 
 任何 D 项超过最晚完成点仍未决，相关工作包转为 blocked，不由实现人员临时选择默认方案。
 
@@ -932,3 +937,29 @@ StackPilot 总体路线只有满足以下结果才视为完成，而不是仅完
 3. Phase 3：所声明支持的 Windows/Linux/macOS 平台都通过真实生命周期测试，开发工具和可观测性可日常使用。
 4. Phase 4：可选智能能力不削弱确定性控制面，所有模型结论和恢复动作可追溯、可审批、可禁用。
 5. 每个阶段都有可重复验收证据、升级路径、已知限制和运维/接入文档。
+
+## 28. 工作区导入与管理专项
+
+该专项按 `plan/plan-20260819-01-workspace-import-and-management.md` 和 ADR-0007 执行，不改写已完成阶段的历史 Gate。首版交付 probe、BAT 静态分析、Maven/npm/Java/Node 候选、结构化修正、原子清单发布、持久化应用 Operation、工作区详情、结构化编辑、同 System ID 路径重关联、CLI action-required handoff 和 Web 流程。Cocos Runner 属于独立 capability；未启用时构建候选必须保持不可应用，不影响安全的其他候选。
+
+专项 Gate 要求：OpenAPI/错误码/migration 一致；真实 SQLite 覆盖导入、幂等、编辑、重关联和恢复；Windows Node fixture 覆盖 start/ready/log/stop/进程树；Web 真实浏览器覆盖导入和管理主流程；WFGame 只读验收必须识别 serve/build-and-serve 两候选，并因当前非回环监听与 Cocos capability 正确阻止应用。
+
+## 29. 受控 Compose Build 与脚本来源图专项
+
+该专项按 `plan/plan-20260822-01-controlled-compose-build-and-import.md` 和 ADR-0008 执行，是 Phase 2 Compose 与工作区导入能力的窄范围安全扩展。它增加 BAT -> 固定 PowerShell `-File` -> Compose/Dockerfile 的只读有界来源图，以及默认 `never`、显式 `always` 的本地 Compose build。对外 capability 固定为 `phase2.compose-build`；首版只允许工作区内 context/Dockerfile，不增加 shell Runner、远程 context、build args/Secret/SSH 或任意 Docker flags。
+
+专项 Gate 要求：旧 Manifest 规范化摘要保持兼容；build 与 up 分步持久化且 up 固定 `--no-build`；显式系统 Start/Restart 按 policy 构建，用户/自动 service-restart 不构建；`healthy|running` readiness 按服务验证并逐项确认；普通 Stop 不删除 volume/image/cache；GNMarket 真实只读、写入和 Docker 副作用 Gate 必须分别获得授权，仓库 fixture 不得冒充真实项目验收。
+
+## 30. Go Runner 与 AgentHub 声明式接入专项
+
+该专项按 ADR-0009 执行，是已完成 Phase 2 Compose/oneshot 能力上的真实系统扩展，不重开
+历史 Gate。范围仅包括受信 `go` Runner、对应 Schema/能力契约，以及 AgentHub 的 Compose
+依赖、数据库 bootstrap、API、Worker、Web install/Web 全拓扑。AgentHub 的 BAT/PowerShell
+启动器继续被静态导入安全边界拒绝，不增加 shell Runner、任意命令 API、容器 exec 或 volume
+删除能力。
+
+专项 Gate 要求：`workspace.runner.go` 只在固定 `go version` 探针、路径解析、摘要和参数数组
+测试通过后公布；AgentHub 清单通过 Schema/语义/DAG 校验；Compose config 与五个容器健康；
+bootstrap 校验 migration checksum 并覆盖空库、重复运行和非法配置路径；真实 Start 达到
+API、Worker、Web ready；真实 Stop 释放受管进程与端口并保留命名卷。Docker daemon、镜像拉取
+或依赖注册表不可用时必须报告未执行 Gate，不能以 fixture 冒充实机结果。

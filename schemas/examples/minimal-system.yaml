@@ -1,0 +1,16 @@
+apiVersion: stackpilot.io/v1alpha1
+kind: System
+metadata:
+  id: example
+  name: Example System
+spec:
+  services:
+    app:
+      driver: process
+      runner: java
+      workingDirectory: ./app
+      arguments: [-jar, app.jar]
+      readiness:
+        type: process
+        timeout: 30s
+        interval: 1s

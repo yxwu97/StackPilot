@@ -10,9 +10,15 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 . (Join-Path $PSScriptRoot 'lib/tooling.ps1')
+. (Join-Path $PSScriptRoot 'lib/versioning.ps1')
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = if ($env:STACKPILOT_VERSION) { $env:STACKPILOT_VERSION } else { 'dev' }
+    $Version = Get-StackPilotProductVersion -RepositoryRoot $repositoryRoot
+    $versionSource = 'VERSION'
+}
+else {
+    $Version = (ConvertFrom-StackPilotVersionText -Value $Version).Value
+    $versionSource = 'override'
 }
 if ([string]::IsNullOrWhiteSpace($Commit)) {
     $Commit = if ($env:STACKPILOT_COMMIT) { $env:STACKPILOT_COMMIT } else { 'unknown' }
@@ -41,9 +47,14 @@ try {
     Invoke-Checked -Description 'Go binary build' -Command {
         & $go build -trimpath -ldflags $linkerFlags -o $resolvedOutput ./cmd/stackpilot
     }
+    $versionOutput = & $resolvedOutput version
+    if ($LASTEXITCODE -ne 0 -or @($versionOutput)[0] -ne "StackPilot $Version") {
+        Remove-Item -LiteralPath $resolvedOutput -Force -ErrorAction SilentlyContinue
+        throw "Built executable did not report expected version $Version."
+    }
 }
 finally {
     Pop-Location
 }
 
-Write-Host "Built $resolvedOutput"
+Write-Host "Built $resolvedOutput (version=$Version source=$versionSource)"

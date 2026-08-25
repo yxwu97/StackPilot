@@ -1,0 +1,66 @@
+apiVersion: stackpilot.io/v1alpha1
+kind: System
+metadata:
+  id: sample-web
+  name: Sample Web System
+  description: Structural v1alpha1 example with a backend and Web service.
+spec:
+  capabilities: {}
+  policies:
+    failFast: true
+    cleanupOnFailure: false
+    keepReadyServices: true
+    stickyPorts: true
+    startTimeout: 10m
+    stopTimeout: 2m
+  ports:
+    backend:
+      protocol: tcp
+      preferred: 8081
+      fallbackRange: 8200-8399
+      conflictPolicy: auto
+      exposure: loopback
+    web:
+      protocol: tcp
+      preferred: 32101
+      fallbackRange: 32200-32399
+      conflictPolicy: auto
+      exposure: loopback
+  services:
+    backend:
+      displayName: Backend
+      required: true
+      driver: process
+      mode: daemon
+      runner: maven
+      workingDirectory: ./backend
+      arguments: [spring-boot:run]
+      environment:
+        SERVER_PORT: "${ports.backend}"
+      dependsOn: {}
+      readiness:
+        type: http
+        url: "http://127.0.0.1:${ports.backend}/actuator/health"
+        timeout: 180s
+        interval: 2s
+        successThreshold: 1
+        failureThreshold: 1
+      stop:
+        gracefulTimeout: 15s
+      restart:
+        policy: never
+    web:
+      displayName: Web
+      driver: process
+      runner: npm
+      workingDirectory: ./web
+      arguments: [run, dev, --, --host, 127.0.0.1, --port, "${ports.web}"]
+      environment:
+        VITE_API_TARGET: "http://127.0.0.1:${ports.backend}"
+      dependsOn:
+        backend: ready
+      readiness:
+        type: http
+        url: "http://127.0.0.1:${ports.web}"
+        timeout: 120s
+        interval: 2s

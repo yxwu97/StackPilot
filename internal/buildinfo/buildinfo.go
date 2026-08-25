@@ -3,7 +3,7 @@ package buildinfo
 
 // These values are replaced with -ldflags during a release build.
 var (
-	Version   = "dev"
+	Version   = "0.0.0"
 	Commit    = "unknown"
 	BuildTime = "unknown"
 )

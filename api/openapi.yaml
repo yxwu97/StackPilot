@@ -1,0 +1,2921 @@
+openapi: 3.1.0
+info:
+  title: StackPilot API
+  version: 0.0.0
+  description: StackPilot local control-plane API contract.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+  - sessionAuth: []
+paths:
+  /health/live:
+    get:
+      security: []
+      operationId: getLiveHealth
+      summary: Check whether the control-plane process is alive
+      responses:
+        "200":
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: live
+  /health/ready:
+    get:
+      security: []
+      operationId: getReadyHealth
+      summary: Check whether persistence and reconciliation are ready
+      responses:
+        "200":
+          description: The control plane is ready to serve stateful requests.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ready
+        "503":
+          $ref: "#/components/responses/HealthNotReady"
+  /version:
+    get:
+      security: []
+      operationId: getVersion
+      summary: Read build identity and enabled capabilities
+      responses:
+        "200":
+          description: Build and API identity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionResponse"
+              example:
+                version: 0.1.0
+                commit: unknown
+                buildTime: unknown
+                apiVersion: v1
+                capabilities: []
+  /api/v1/auth/bootstrap:
+    post:
+      operationId: issueBrowserBootstrap
+      summary: Issue a short-lived single-use browser bootstrap code
+      security:
+        - bearerAuth: []
+      responses:
+        "201":
+          description: One-time bootstrap code issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BootstrapResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/auth/session:
+    post:
+      operationId: exchangeBrowserSession
+      summary: Exchange a same-origin fragment bootstrap for a browser session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionExchangeRequest"
+      responses:
+        "201":
+          description: Browser session created and set as an HttpOnly cookie.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      operationId: renewBrowserSession
+      summary: Renew an active browser session and rotate its CSRF value
+      description: Advances the 30-minute renewal expiry without exceeding the eight-hour absolute limit, rotates CSRF, and refreshes the HttpOnly cookie. This state-changing recovery GET is same-origin credentialed and is never cacheable.
+      security:
+        - sessionAuth: []
+      responses:
+        "200":
+          description: Session was renewed and its CSRF value and cookie were rotated.
+          headers:
+            Set-Cookie:
+              description: Refreshed HttpOnly session cookie with the authoritative renewal expiry.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      operationId: revokeBrowserSession
+      summary: Revoke the current browser session
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      responses:
+        "204":
+          description: Browser session revoked and cookie expired.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/auth/token/rotate:
+    post:
+      operationId: rotateLocalAuthenticationToken
+      summary: Rotate the OS-protected local token and invalidate browser sessions
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      responses:
+        "200":
+          description: Local token rotated; browser callers receive an expired session cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenRotationResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/audit-events:
+    get:
+      operationId: listAuditEvents
+      summary: List safe immutable audit records after a stable cursor
+      parameters:
+        - name: afterId
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        "200":
+          description: Ascending audit event page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/v1/secrets/{systemId}/{secretName}:
+    parameters:
+      - $ref: "#/components/parameters/SystemId"
+      - $ref: "#/components/parameters/SecretName"
+    get:
+      operationId: getSecretMetadata
+      summary: Read non-sensitive metadata for one protected Secret
+      responses:
+        "200":
+          description: Secret metadata without its value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretMetadata"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: setSecret
+      summary: Atomically set a protected Secret from a transient request buffer
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SecretSetRequest"
+      responses:
+        "200":
+          description: New non-sensitive Secret metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretMetadata"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      operationId: deleteSecret
+      summary: Delete a protected Secret and its metadata projection
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      responses:
+        "200":
+          description: Metadata of the deleted Secret; the value is never returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretMetadata"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/workspaces:
+    get:
+      operationId: listWorkspaces
+      summary: List registered workspaces
+      responses:
+        "200":
+          description: Registered workspaces in stable order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceList"
+    post:
+      operationId: registerWorkspace
+      summary: Register the fixed manifest in a workspace root
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterWorkspaceRequest"
+      responses:
+        "201":
+          description: Workspace registered with its first valid snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableManifest"
+  /api/v1/workspaces/{workspaceId}:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+    get:
+      operationId: getWorkspaceDetail
+      summary: Get one consistent workspace management snapshot
+      responses:
+        "200":
+          description: Workspace registration, source, manifest, services, ports, and runtime summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: unregisterWorkspace
+      summary: Remove StackPilot catalog data without changing workspace files
+      description: Requires the workspace to have no active runtime instance or Operation.
+      responses:
+        "204":
+          description: Workspace unregistered.
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/workspaces/probe:
+    post:
+      operationId: probeWorkspace
+      summary: Probe a workspace root and choose registration or initialization
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceProbeRequest"
+      responses:
+        "200":
+          description: A normal probe state and bounded BAT candidates.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceProbe"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/UnprocessableManifest"
+  /api/v1/workspace-imports/analyze:
+    post:
+      operationId: analyzeWorkspaceImport
+      summary: Persist a bounded read-only BAT analysis draft
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceAnalyzeRequest"
+      responses:
+        "201":
+          description: Persisted structured import draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceImportDraft"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/UnprocessableManifest"
+  /api/v1/workspace-imports/drafts/{draftId}:
+    parameters:
+      - name: draftId
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^draft_[0-9a-f]{32}$"
+    get:
+      operationId: getWorkspaceImportDraft
+      summary: Get a persisted workspace import draft
+      responses:
+        "200":
+          description: Import draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceImportDraft"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/workspace-imports/drafts/{draftId}/apply:
+    parameters:
+      - name: draftId
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^draft_[0-9a-f]{32}$"
+      - $ref: "#/components/parameters/CSRF"
+      - $ref: "#/components/parameters/IdempotencyKey"
+    post:
+      operationId: applyWorkspaceImportDraft
+      summary: Queue a durable manifest publication and registration Operation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceApplyRequest"
+      responses:
+        "202":
+          description: Import Operation accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationRef"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableManifest"
+  /api/v1/workspace-imports/drafts/{draftId}/corrections:
+    parameters:
+      - name: draftId
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^draft_[0-9a-f]{32}$"
+      - $ref: "#/components/parameters/CSRF"
+    post:
+      operationId: correctWorkspaceImportDraft
+      summary: Create a validated draft from structured field corrections
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceImportCorrectionRequest"
+      responses:
+        "201":
+          description: Corrected persisted draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceImportDraft"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableManifest"
+  /api/v1/workspace-imports/operations/{operationId}:
+    parameters:
+      - $ref: "#/components/parameters/OperationId"
+    get:
+      operationId: getWorkspaceImportOperation
+      summary: Get a pre-registration workspace Operation
+      responses:
+        "200":
+          description: Workspace import Operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceImportOperation"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/workspaces/{workspaceId}/refresh:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+    post:
+      operationId: refreshWorkspaceManifest
+      summary: Re-read and validate the fixed workspace manifest
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      responses:
+        "200":
+          description: Workspace refreshed from the fixed manifest path.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableManifest"
+  /api/v1/workspaces/{workspaceId}/edit-drafts:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+      - $ref: "#/components/parameters/CSRF"
+    post:
+      operationId: createWorkspaceEditDraft
+      summary: Create a structured edit preview against the current manifest digest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceEditDraftRequest"
+      responses:
+        "201":
+          description: Persisted edit draft with validated manifest preview.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceImportDraft"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/workspaces/{workspaceId}/relink-drafts:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+      - $ref: "#/components/parameters/CSRF"
+    post:
+      operationId: createWorkspaceRelinkDraft
+      summary: Validate a new root for the same registered system identity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceRelinkDraftRequest"
+      responses:
+        "201":
+          description: Persisted relink draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceImportDraft"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/systems:
+    get:
+      operationId: listSystems
+      summary: List registered system definitions
+      responses:
+        "200":
+          description: Registered system summaries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemList"
+  /api/v1/systems/{systemId}:
+    parameters:
+      - $ref: "#/components/parameters/SystemId"
+      - $ref: "#/components/parameters/WorkspaceIdQuery"
+    get:
+      operationId: getSystem
+      summary: Read one system and its last valid definition summary
+      responses:
+        "200":
+          description: System definition summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/services/{systemId}/{serviceId}:
+    parameters:
+      - $ref: "#/components/parameters/SystemId"
+      - $ref: "#/components/parameters/ServiceId"
+      - $ref: "#/components/parameters/WorkspaceIdQuery"
+    get:
+      operationId: getService
+      summary: Read a safe service definition summary
+      responses:
+        "200":
+          description: Service definition summary without commands or environment values.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceDefinition"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/systems/{systemId}/start:
+    parameters:
+      - $ref: "#/components/parameters/SystemId"
+    post:
+      operationId: startSystem
+      summary: Queue the Phase 1B root-service start operation
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartSystemRequest"
+      responses:
+        "202":
+          description: The operation was queued or replayed idempotently.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationRef"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableManifest"
+  /api/v1/systems/{systemId}/stop:
+    parameters:
+      - $ref: "#/components/parameters/SystemId"
+    post:
+      operationId: stopSystem
+      summary: Queue a non-cancellable Phase 1B root-service stop operation
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StopSystemRequest"
+      responses:
+        "202":
+          description: The stop operation was queued or replayed idempotently.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationRef"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/systems/{systemId}/restart:
+    parameters:
+      - $ref: "#/components/parameters/SystemId"
+    post:
+      operationId: restartSystem
+      summary: Stop the active runtime and fresh-start the latest valid manifest
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartSystemRequest"
+      responses:
+        "202":
+          description: The restart operation was queued or replayed idempotently.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationRef"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableManifest"
+  /api/v1/services/{systemId}/{serviceId}/restart:
+    parameters:
+      - $ref: "#/components/parameters/SystemId"
+      - $ref: "#/components/parameters/ServiceId"
+    post:
+      operationId: restartService
+      summary: Restart one service and its transitive downstream closure
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StopSystemRequest"
+      responses:
+        "202":
+          description: The service restart operation was queued or replayed idempotently.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationRef"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/systems/{systemId}/status:
+    parameters:
+      - $ref: "#/components/parameters/SystemId"
+      - $ref: "#/components/parameters/WorkspaceIdQuery"
+    get:
+      operationId: getSystemRuntimeStatus
+      summary: Read the server-computed active runtime state
+      responses:
+        "200":
+          description: Current runtime status, or stopped when no active instance exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemRuntimeStatus"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/operations/{operationId}:
+    parameters:
+      - name: operationId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/OperationId"
+    get:
+      operationId: getOperation
+      summary: Read an operation and its ordered structured steps
+      responses:
+        "200":
+          description: Persisted operation snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/operations:
+    get:
+      operationId: listOperations
+      summary: List the newest persisted operations and structured steps
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceIdQuery"
+      responses:
+        "200":
+          description: At most 50 operations in newest-first order.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 50
+                    items:
+                      $ref: "#/components/schemas/Operation"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/v1/operations/{operationId}/cancel:
+    parameters:
+      - name: operationId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/OperationId"
+    post:
+      operationId: cancelOperation
+      summary: Record cooperative cancellation for a cancellable operation
+      responses:
+        "202":
+          description: Cancellation was recorded; terminal compensation may still be running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationRef"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/events:
+    get:
+      operationId: streamEvents
+      summary: Stream persisted domain events with resumable IDs
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: A server-sent event stream. Last-Event-ID takes precedence over cursor.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/services/{systemId}/{serviceId}/logs:
+    parameters:
+      - $ref: "#/components/parameters/SystemId"
+      - $ref: "#/components/parameters/ServiceId"
+    get:
+      operationId: getServiceLogs
+      summary: Read a bounded newest-first historical log window
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceIdQuery"
+        - name: instanceId
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^si_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        - name: cursor
+          in: query
+          required: false
+          description: Return the latest entries with sequence values lower than this cursor.
+          schema:
+            type: integer
+            minimum: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 500
+        - name: level
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [trace, debug, info, warn, error, fatal]
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Ascending log entries from the selected newest window.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/log-stream:
+    get:
+      operationId: streamServiceLogs
+      summary: Stream redacted service logs after a sequence cursor
+      parameters:
+        - name: instanceId
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^si_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        - name: serviceId
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/ManifestId"
+        - name: afterSequence
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: A server-sent log stream whose SSE IDs are service-instance sequence values.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/incidents:
+    get:
+      operationId: listIncidents
+      summary: List bounded diagnostic incidents for one workspace
+      parameters:
+        - name: workspaceId
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/WorkspaceId"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Newest-first incident summaries with redacted bounded context.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/v1/incidents/{incidentId}:
+    get:
+      operationId: getIncident
+      summary: Read one incident and all versioned deterministic analyses
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^inc_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+      responses:
+        "200":
+          description: Traceable incident evidence and diagnoses.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/incidents/{incidentId}/analyze:
+    post:
+      operationId: analyzeIncident
+      summary: Queue a read-only evidence refresh and deterministic rule analysis
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^inc_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+        - $ref: "#/components/parameters/CSRF"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "202":
+          description: The read-only analyze Operation was queued or replayed idempotently.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationRef"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Long-lived local token read only from OS-protected storage by CLI clients.
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: stackpilot_session
+  parameters:
+    CSRF:
+      name: X-StackPilot-CSRF
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    WorkspaceId:
+      name: workspaceId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/WorkspaceId"
+    WorkspaceIdQuery:
+      name: workspaceId
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/WorkspaceId"
+    SystemId:
+      name: systemId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ManifestId"
+    ServiceId:
+      name: serviceId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ManifestId"
+    SecretName:
+      name: secretName
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ManifestId"
+    OperationId:
+      name: operationId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/OperationId"
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 128
+  schemas:
+    ErrorCode:
+      type: string
+      enum:
+        - AUTH_BOOTSTRAP_INVALID
+        - EVENT_CURSOR_EXPIRED
+        - FEATURE_NOT_ENABLED
+        - AUTH_BROWSER_REQUEST_REJECTED
+        - AUTH_CAPACITY_REACHED
+        - AUTH_SESSION_INVALID
+        - AUTH_TOKEN_INVALID
+        - CONTROL_PLANE_RESTARTED
+        - COMPOSE_CONFIG_INVALID
+        - COMPOSE_BUILD_CONFIG_INVALID
+        - COMPOSE_BUILD_FAILED
+        - COMPOSE_BUILD_TIMEOUT
+        - COMPOSE_DISCOVERY_FAILED
+        - COMPOSE_INSPECT_FAILED
+        - COMPOSE_LOG_FOLLOW_FAILED
+        - COMPOSE_LIFECYCLE_INVALID
+        - COMPOSE_LIFECYCLE_TIMEOUT
+        - COMPOSE_NOT_FOUND
+        - COMPOSE_OVERRIDE_CONFLICT
+        - COMPOSE_OVERRIDE_INVALID
+        - COMPOSE_PREFLIGHT_TIMEOUT
+        - COMPOSE_PROJECT_IDENTITY_MISMATCH
+        - COMPOSE_PROJECT_NOT_FOUND
+        - COMPOSE_START_FAILED
+        - COMPOSE_STOP_FAILED
+        - CONTAINER_UNHEALTHY
+        - COMPOSE_VERSION_UNSUPPORTED
+        - DOCKER_DAEMON_UNAVAILABLE
+        - DOCKER_NOT_FOUND
+        - DOCKER_VERSION_UNSUPPORTED
+        - HEALTH_NOT_READY
+        - HEALTH_READINESS_TIMEOUT
+        - HTTP_BODY_MISMATCH
+        - HTTP_STATUS_MISMATCH
+        - HTTP_TIMEOUT
+        - INTERNAL_ERROR
+        - LOG_CURSOR_EXPIRED
+        - IDEMPOTENCY_KEY_REUSED
+        - MANIFEST_DUPLICATE_KEY
+        - MANIFEST_CYCLE_DETECTED
+        - MANIFEST_DURATION_INVALID
+        - MANIFEST_FILE_TOO_LARGE
+        - MANIFEST_HEALTH_TARGET_UNSAFE
+        - MANIFEST_CHANGED
+        - MANIFEST_MULTIPLE_DOCUMENTS
+        - MANIFEST_NOT_REGULAR_FILE
+        - MANIFEST_PATH_OUTSIDE_WORKSPACE
+        - MANIFEST_PORT_RANGE_INVALID
+        - MANIFEST_REFERENCE_NOT_FOUND
+        - MANIFEST_SCHEMA_INVALID
+        - MANIFEST_SEMANTIC_INVALID
+        - MANIFEST_TEMPLATE_INVALID
+        - MANIFEST_UNKNOWN_FIELD
+        - MANIFEST_YAML_INVALID
+        - METHOD_NOT_ALLOWED
+        - OPERATION_ALREADY_ACTIVE
+        - OPERATION_INVALID_STATE
+        - OPERATION_NOT_CANCELLABLE
+        - OPERATION_NOT_FOUND
+        - PLATFORM_NOT_SUPPORTED
+        - PORT_CONFLICT
+        - PROCESS_EXITED
+        - PROCESS_IDENTITY_MISMATCH
+        - PROCESS_START_FAILED
+        - PROCESS_STOP_FAILED
+        - REQUEST_VALIDATION_FAILED
+        - RESOURCE_NOT_FOUND
+        - RUNNER_NOT_FOUND
+        - RUNNER_PATH_UNSAFE
+        - RUNNER_VERSION_CHECK_FAILED
+        - RUNNER_VERSION_CHECK_TIMEOUT
+        - SECRET_INVALID
+        - SECRET_NOT_FOUND
+        - SECRET_VERSION_CONFLICT
+        - TCP_REFUSED
+        - TCP_TIMEOUT
+        - SUPERVISOR_EXITED
+        - SUPERVISOR_UNAVAILABLE
+        - WORKSPACE_ALREADY_REGISTERED
+        - WORKSPACE_ID_REQUIRED
+        - WORKSPACE_MANIFEST_UNAVAILABLE
+        - WORKSPACE_NOT_FOUND
+        - WORKSPACE_PATH_INVALID
+        - WORKSPACE_SCRIPT_NOT_FOUND
+        - WORKSPACE_SCRIPT_OUTSIDE
+        - WORKSPACE_SCRIPT_TYPE_UNSUPPORTED
+        - WORKSPACE_SCRIPT_ENCODING_UNSUPPORTED
+        - WORKSPACE_SCRIPT_TOO_LARGE
+        - WORKSPACE_SCRIPT_SYNTAX_UNSUPPORTED
+        - WORKSPACE_SCRIPT_DANGEROUS
+        - WORKSPACE_SCRIPT_REFERENCE_CYCLE
+        - WORKSPACE_IMPORT_INCOMPLETE
+        - WORKSPACE_IMPORT_PORT_UNCONFIRMED
+        - WORKSPACE_IMPORT_DEPENDENCY_UNCONFIRMED
+        - WORKSPACE_IMPORT_SOURCE_CHANGED
+        - WORKSPACE_IMPORT_DRAFT_EXPIRED
+        - WORKSPACE_MANIFEST_CONFLICT
+        - WORKSPACE_MANIFEST_WRITE_FAILED
+        - WORKSPACE_EDIT_RUNTIME_ACTIVE
+        - WORKSPACE_UNREGISTER_RUNTIME_ACTIVE
+        - WORKSPACE_RELINK_SYSTEM_MISMATCH
+        - WORKSPACE_SYSTEM_ID_CHANGED
+    TokenRotationResponse:
+      type: object
+      additionalProperties: false
+      required: [createdAt]
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required: [id, subjectType, action, targetType, result, traceId, clientType, occurredAt]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        subjectType:
+          type: string
+          enum: [local_token, browser_session, system]
+        action:
+          type: string
+        targetType:
+          type: string
+        targetId:
+          type: string
+        result:
+          type: string
+          enum: [accepted, succeeded, failed, denied]
+        traceId:
+          type: string
+        operationId:
+          type: string
+        clientType:
+          type: string
+          enum: [cli, web, internal]
+        errorCode:
+          $ref: "#/components/schemas/ErrorCode"
+        occurredAt:
+          type: string
+          format: date-time
+    AuditEventPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        nextCursor:
+          type: [integer, "null"]
+          minimum: 1
+    BootstrapResponse:
+      type: object
+      additionalProperties: false
+      required: [code, expiresAt]
+      properties:
+        code:
+          type: string
+          minLength: 43
+          maxLength: 43
+        expiresAt:
+          type: string
+          format: date-time
+    SessionExchangeRequest:
+      type: object
+      additionalProperties: false
+      required: [bootstrap]
+      properties:
+        bootstrap:
+          type: string
+          minLength: 43
+          maxLength: 43
+    SessionResponse:
+      type: object
+      additionalProperties: false
+      required: [csrf, expiresAt]
+      properties:
+        csrf:
+          type: string
+          minLength: 43
+          maxLength: 43
+        expiresAt:
+          type: string
+          format: date-time
+    Error:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - details
+        - traceId
+      properties:
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+        operationId:
+          type:
+            - string
+            - "null"
+          pattern: "^op_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        traceId:
+          type: string
+          pattern: "^tr_[0-9a-f]{32}$"
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - error
+      properties:
+        error:
+          $ref: "#/components/schemas/Error"
+    OperationId:
+      type: string
+      pattern: "^op_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    StartSystemRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        portOverrides:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 1024
+            maximum: 65535
+        failurePolicy:
+          type: object
+          additionalProperties: false
+          properties:
+            failFast:
+              type: boolean
+            cleanupOnFailure:
+              type: boolean
+            keepReadyServices:
+              type: boolean
+    StopSystemRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+    OperationRef:
+      type: object
+      additionalProperties: false
+      required: [operationId, state]
+      properties:
+        operationId:
+          $ref: "#/components/schemas/OperationId"
+        state:
+          type: string
+          enum: [queued, running, cancelling, succeeded, failed, cancelled]
+    OperationStep:
+      type: object
+      additionalProperties: false
+      required: [number, key, state, attempt]
+      properties:
+        number:
+          type: integer
+          minimum: 1
+        key:
+          type: string
+        state:
+          type: string
+          enum: [pending, running, succeeded, failed, skipped, cancelled]
+        attempt:
+          type: integer
+          minimum: 0
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        durationMs:
+          type: integer
+          minimum: 0
+        errorCode:
+          type: string
+        detailRef:
+          type: string
+    Operation:
+      type: object
+      additionalProperties: false
+      required: [id, workspaceId, systemId, type, state, cancellable, createdAt, steps]
+      properties:
+        id:
+          $ref: "#/components/schemas/OperationId"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        systemId:
+          $ref: "#/components/schemas/ManifestId"
+        type:
+          type: string
+          enum: [start, stop, restart, service-restart, port-plan, refresh, analyze]
+        state:
+          type: string
+          enum: [queued, running, cancelling, succeeded, failed, cancelled]
+        cancellable:
+          type: boolean
+        cancelRequestedAt:
+          type: string
+          format: date-time
+        errorCode:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        durationMs:
+          type: integer
+          minimum: 0
+        steps:
+          type: array
+          maxItems: 128
+          items:
+            $ref: "#/components/schemas/OperationStep"
+    ServiceRuntimeStatus:
+      type: object
+      additionalProperties: false
+      required: [serviceId, serviceInstanceId, driver, mode, state, stateVersion, dependsOn, containers]
+      properties:
+        serviceId:
+          $ref: "#/components/schemas/ManifestId"
+        serviceInstanceId:
+          type: string
+          pattern: "^svi_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        driver:
+          type: string
+          enum: [process, compose]
+        mode:
+          type: string
+          enum: [daemon, oneshot]
+        state:
+          type: string
+          enum: [stopped, waiting_dependency, starting, waiting_ready, ready, degraded, completed, stopping, failed, unknown]
+        stateVersion:
+          type: integer
+          minimum: 1
+        pid:
+          type: integer
+          minimum: 1
+        processStartedAt:
+          type: string
+          format: date-time
+        commandDigest:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        exitCode:
+          type: integer
+          minimum: 0
+        dependsOn:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ManifestId"
+        containers:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/ComposeContainerRuntimeStatus"
+    ComposeContainerRuntimeStatus:
+      type: object
+      additionalProperties: false
+      required: [service, state, health, exitCode]
+      properties:
+        service:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        state:
+          type: string
+          enum: [running, stopped, exited, restarting, paused, dead, created]
+        health:
+          type: string
+          enum: [healthy, unhealthy, starting, ""]
+        exitCode:
+          type: integer
+    PortRuntimeStatus:
+      type: object
+      additionalProperties: false
+      required: [logicalName, port, source, replaced]
+      properties:
+        logicalName:
+          $ref: "#/components/schemas/ManifestId"
+        port:
+          type: integer
+          minimum: 1024
+          maximum: 65535
+        source:
+          type: string
+          enum: [request, workspace, sticky, preferred, fallback]
+        replaced:
+          type: boolean
+        conflictPort:
+          type: integer
+          minimum: 1024
+          maximum: 65535
+    SystemRuntimeStatus:
+      type: object
+      additionalProperties: false
+      required: [systemId, workspaceId, state, services, ports]
+      properties:
+        systemId:
+          $ref: "#/components/schemas/ManifestId"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        state:
+          type: string
+          enum: [stopping, failed, starting, degraded, running, stopped]
+        instanceId:
+          type: string
+          pattern: "^si_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        manifestDigest:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        resolvedSpecDigest:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        startedAt:
+          type: string
+          format: date-time
+        stoppedAt:
+          type: string
+          format: date-time
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceRuntimeStatus"
+        ports:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortRuntimeStatus"
+    DomainEvent:
+      type: object
+      additionalProperties: false
+      required: [id, type, occurredAt, workspaceId, systemId, data]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        type:
+          type: string
+          pattern: "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9]*)+$"
+        occurredAt:
+          type: string
+          format: date-time
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        systemId:
+          $ref: "#/components/schemas/ManifestId"
+        instanceId:
+          type: string
+          pattern: "^si_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        serviceInstanceId:
+          type: string
+          pattern: "^svi_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        operationId:
+          type: string
+          pattern: "^op_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        data:
+          type: object
+          additionalProperties: true
+    LogEntry:
+      type: object
+      additionalProperties: false
+      required: [timestamp, systemId, instanceId, serviceId, stream, level, message, sequence, truncated]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        systemId:
+          $ref: "#/components/schemas/ManifestId"
+        instanceId:
+          type: string
+          pattern: "^si_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        serviceId:
+          $ref: "#/components/schemas/ManifestId"
+        stream:
+          type: string
+          enum: [stdout, stderr]
+        level:
+          type: string
+        message:
+          type: string
+        operationId:
+          type: string
+          pattern: "^op_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        sequence:
+          type: integer
+          minimum: 1
+        truncated:
+          type: boolean
+    LogPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 5000
+          items:
+            $ref: "#/components/schemas/LogEntry"
+        nextCursor:
+          type: [integer, "null"]
+          minimum: 1
+    IncidentEvidence:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [event, health, log]
+        eventId:
+          type: integer
+          minimum: 1
+        healthResultId:
+          type: integer
+          minimum: 1
+        serviceInstanceId:
+          type: string
+          pattern: "^svi_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        logSequence:
+          type: integer
+          minimum: 1
+    IncidentContext:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, workspaceId, kind, triggerCode, windowStart, windowEnd, dependencies, ports, evidence, logs]
+      properties:
+        schemaVersion:
+          type: string
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        systemInstanceId:
+          type: string
+        serviceInstanceId:
+          type: string
+        serviceId:
+          $ref: "#/components/schemas/ManifestId"
+        kind:
+          type: string
+          enum: [port-conflict, process-exit, readiness-timeout, liveness-failure, restart-limit, identity-mismatch, known-log-error]
+        triggerCode:
+          type: string
+        windowStart:
+          type: string
+          format: date-time
+        windowEnd:
+          type: string
+          format: date-time
+        dependencies:
+          type: object
+          additionalProperties:
+            type: string
+        ports:
+          type: object
+          additionalProperties:
+            type: integer
+        evidence:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/IncidentEvidence"
+        logs:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: true
+    Incident:
+      type: object
+      additionalProperties: false
+      required: [id, workspaceId, kind, severity, state, occurrenceCount, context, firstSeenAt, lastSeenAt]
+      properties:
+        id:
+          type: string
+          pattern: "^inc_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        systemInstanceId:
+          type: string
+        serviceInstanceId:
+          type: string
+        serviceId:
+          $ref: "#/components/schemas/ManifestId"
+        kind:
+          type: string
+        severity:
+          type: string
+          enum: [info, warning, critical]
+        state:
+          type: string
+          enum: [open, resolved]
+        occurrenceCount:
+          type: integer
+          minimum: 1
+        context:
+          $ref: "#/components/schemas/IncidentContext"
+        firstSeenAt:
+          type: string
+          format: date-time
+        lastSeenAt:
+          type: string
+          format: date-time
+    IncidentList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/Incident"
+    IncidentAnalysis:
+      type: object
+      additionalProperties: false
+      required: [id, engine, schemaVersion, result, createdAt]
+      properties:
+        id:
+          type: integer
+        engine:
+          type: string
+        schemaVersion:
+          type: string
+        result:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+    IncidentDetail:
+      type: object
+      additionalProperties: false
+      required: [incident, analyses]
+      properties:
+        incident:
+          $ref: "#/components/schemas/Incident"
+        analyses:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/IncidentAnalysis"
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - live
+            - ready
+    VersionResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - commit
+        - buildTime
+        - apiVersion
+        - capabilities
+      properties:
+        version:
+          type: string
+          description: Product version compiled into the running StackPilot executable.
+          pattern: "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+          example: 0.1.0
+        commit:
+          type: string
+        buildTime:
+          type: string
+        apiVersion:
+          type: string
+          const: v1
+        capabilities:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+    ManifestId:
+      type: string
+      pattern: "^[a-z][a-z0-9-]{0,62}$"
+    SecretSetRequest:
+      type: object
+      additionalProperties: false
+      required: [value]
+      properties:
+        value:
+          type: string
+          contentEncoding: base64
+          minLength: 4
+          maxLength: 87384
+    SecretMetadata:
+      type: object
+      additionalProperties: false
+      required: [id, systemId, name, provider, version, updatedAt]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{0,62}/[a-z][a-z0-9-]{0,62}$"
+        systemId:
+          $ref: "#/components/schemas/ManifestId"
+        name:
+          $ref: "#/components/schemas/ManifestId"
+        provider:
+          type: string
+          const: dpapi-file
+        version:
+          type: integer
+          minimum: 1
+        updatedAt:
+          type: string
+          format: date-time
+    WorkspaceId:
+      type: string
+      pattern: "^ws_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    Digest:
+      type: string
+      pattern: "^[0-9a-f]{64}$"
+    RegisterWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - path
+      properties:
+        path:
+          type: string
+          minLength: 1
+          maxLength: 32767
+    Workspace:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - systemId
+        - systemName
+        - path
+        - manifestStatus
+        - manifestDigest
+        - serviceCount
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          $ref: "#/components/schemas/WorkspaceId"
+        systemId:
+          $ref: "#/components/schemas/ManifestId"
+        systemName:
+          type: string
+        path:
+          type: string
+        manifestStatus:
+          type: string
+          enum: [valid, invalid]
+        manifestDigest:
+          $ref: "#/components/schemas/Digest"
+        lastErrorCode:
+          $ref: "#/components/schemas/ErrorCode"
+        serviceCount:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    WorkspaceList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Workspace"
+    WorkspaceProbeRequest:
+      $ref: "#/components/schemas/RegisterWorkspaceRequest"
+    WorkspaceProbe:
+      type: object
+      additionalProperties: false
+      required: [state, path, candidates]
+      properties:
+        state:
+          type: string
+          enum: [ready_to_register, initialization_required]
+        path:
+          type: string
+        candidates:
+          type: array
+          maxItems: 2000
+          items:
+            type: object
+            additionalProperties: false
+            required: [path, size]
+            properties:
+              path:
+                type: string
+              size:
+                type: integer
+                minimum: 0
+                maximum: 262144
+    WorkspaceAnalyzeRequest:
+      type: object
+      additionalProperties: false
+      required: [path, script]
+      properties:
+        path:
+          type: string
+          minLength: 1
+          maxLength: 32767
+        script:
+          type: string
+          minLength: 1
+          maxLength: 1024
+    WorkspaceApplyRequest:
+      type: object
+      additionalProperties: false
+      required: [candidateId]
+      properties:
+        candidateId:
+          type: string
+          minLength: 1
+          maxLength: 64
+    WorkspaceImportCorrectionRequest:
+      type: object
+      additionalProperties: false
+      required: [candidateId, systemName, description, serviceDisplayNames, portPreferred, composeRunning, composeBuild]
+      properties:
+        candidateId:
+          type: string
+          minLength: 1
+          maxLength: 64
+        systemName:
+          type: string
+          minLength: 1
+          maxLength: 128
+        description:
+          type: string
+          maxLength: 1024
+        serviceDisplayNames:
+          type: object
+          additionalProperties:
+            type: string
+            minLength: 1
+            maxLength: 128
+        portPreferred:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 1024
+            maximum: 65535
+        composeRunning:
+          type: object
+          additionalProperties:
+            type: boolean
+        composeBuild:
+          type: boolean
+    WorkspaceRelinkDraftRequest:
+      $ref: "#/components/schemas/RegisterWorkspaceRequest"
+    WorkspaceImportDraft:
+      type: object
+      additionalProperties: false
+      required: [id, state, path, expiresAt, draft]
+      properties:
+        id:
+          type: string
+          pattern: "^draft_[0-9a-f]{32}$"
+        state:
+          type: string
+          enum: [active, applied, expired]
+        path:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        draft:
+          $ref: "#/components/schemas/WorkspaceImportDraftContent"
+    WorkspaceImportDraftContent:
+      type: object
+      description: Bounded structured draft with relative evidence; never contains BAT source text or service environments.
+      additionalProperties: false
+      required: [systemId, systemName, analyzedAt, candidates]
+      properties:
+        systemId:
+          $ref: "#/components/schemas/ManifestId"
+        systemName:
+          type: string
+          minLength: 1
+          maxLength: 128
+        description:
+          type: string
+          maxLength: 1024
+        sourceScript:
+          type: string
+          maxLength: 1024
+        sourceDigest:
+          $ref: "#/components/schemas/Digest"
+        analyzedAt:
+          type: string
+          format: date-time
+        candidates:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            $ref: "#/components/schemas/WorkspaceImportCandidate"
+    WorkspaceImportCandidate:
+      type: object
+      additionalProperties: false
+      required: [id, name, description, applyable, requiredCapabilities, services, ports, findings, manifestYaml, manifestDigest]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        name:
+          type: string
+          maxLength: 128
+        description:
+          type: string
+          maxLength: 1024
+        applyable:
+          type: boolean
+        requiredCapabilities:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+        services:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/WorkspaceServiceDraft"
+        ports:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/WorkspacePortDraft"
+        findings:
+          type: array
+          maxItems: 256
+          items:
+            $ref: "#/components/schemas/WorkspaceImportFinding"
+        manifestYaml:
+          type: string
+          maxLength: 1048576
+        manifestDigest:
+          $ref: "#/components/schemas/Digest"
+    WorkspaceServiceDraft:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, driver, mode, readinessType, confidence]
+      properties:
+        id:
+          $ref: "#/components/schemas/ManifestId"
+        displayName:
+          type: string
+          maxLength: 128
+        driver:
+          type: string
+          enum: [process, compose]
+        runner:
+          type: string
+          enum: [maven, npm, java, node, go]
+        mode:
+          type: string
+          enum: [daemon, oneshot]
+        workingDirectory:
+          type: string
+          maxLength: 1024
+        readinessType:
+          type: string
+        readinessTarget:
+          type: string
+        confidence:
+          type: string
+          enum: [confirmed, inferred, unresolved]
+        compose:
+          $ref: "#/components/schemas/WorkspaceComposeDraft"
+    WorkspaceComposeDraft:
+      type: object
+      additionalProperties: false
+      required: [file, services, buildPolicy, buildServices, readiness, ports]
+      properties:
+        file:
+          type: string
+          maxLength: 1024
+        services:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+        buildPolicy:
+          type: string
+          enum: [never, always]
+        buildServices:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+        readiness:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [healthy, running]
+        ports:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            required: [service, target]
+            properties:
+              service:
+                type: string
+              target:
+                type: integer
+                minimum: 1
+                maximum: 65535
+    WorkspacePortDraft:
+      type: object
+      additionalProperties: false
+      required: [name, preferred, exposure, confidence]
+      properties:
+        name:
+          $ref: "#/components/schemas/ManifestId"
+        preferred:
+          type: integer
+          minimum: 0
+          maximum: 65535
+        exposure:
+          type: string
+          enum: [loopback, all_interfaces]
+        confidence:
+          type: string
+          enum: [confirmed, inferred, unresolved]
+    WorkspaceImportFinding:
+      type: object
+      additionalProperties: false
+      required: [code, severity, message, confidence, evidence]
+      properties:
+        code:
+          type: string
+        severity:
+          type: string
+          enum: [info, warning, blocking]
+        message:
+          type: string
+          maxLength: 1024
+        field:
+          type: string
+        confidence:
+          type: string
+          enum: [confirmed, inferred, unresolved]
+        evidence:
+          type: array
+          maxItems: 32
+          items:
+            type: object
+            additionalProperties: false
+            required: [path]
+            properties:
+              path:
+                type: string
+                maxLength: 1024
+              line:
+                type: integer
+                minimum: 1
+              field:
+                type: string
+    WorkspaceImportOperation:
+      type: object
+      additionalProperties: false
+      required: [id, type, state, createdAt, steps]
+      properties:
+        id:
+          $ref: "#/components/schemas/OperationId"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        type:
+          type: string
+          enum: [workspace-import-apply, workspace-edit-apply, workspace-relink-apply]
+        state:
+          type: string
+          enum: [queued, running, succeeded, failed, cancelled]
+        errorCode:
+          $ref: "#/components/schemas/ErrorCode"
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        durationMs:
+          type: integer
+          minimum: 0
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [number, key, state]
+            properties:
+              number:
+                type: integer
+                minimum: 1
+              key:
+                type: string
+              state:
+                type: string
+                enum: [pending, running, succeeded, failed, skipped, cancelled]
+              startedAt:
+                type: string
+                format: date-time
+              finishedAt:
+                type: string
+                format: date-time
+              errorCode:
+                $ref: "#/components/schemas/ErrorCode"
+    WorkspaceEditDraftRequest:
+      type: object
+      additionalProperties: false
+      required: [systemName, description, serviceDisplayNames, portPreferred]
+      properties:
+        systemName:
+          type: string
+          minLength: 1
+          maxLength: 128
+        description:
+          type: string
+          maxLength: 1024
+        serviceDisplayNames:
+          type: object
+          additionalProperties:
+            type: string
+            maxLength: 128
+        portPreferred:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 1024
+            maximum: 65535
+    WorkspaceDetail:
+      type: object
+      additionalProperties: false
+      required: [workspace, source, manifest, services, ports, runtime]
+      properties:
+        workspace:
+          $ref: "#/components/schemas/Workspace"
+        source:
+          type: object
+          additionalProperties: false
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum: [existing-manifest, bat-import, structured-edit, relinked-manifest]
+            entryScript:
+              type: string
+            sourceDigest:
+              $ref: "#/components/schemas/Digest"
+            analyzedAt:
+              type: string
+              format: date-time
+        manifest:
+          type: object
+          additionalProperties: false
+          required: [digest, apiVersion, yaml, createdAt]
+          properties:
+            digest:
+              $ref: "#/components/schemas/Digest"
+            apiVersion:
+              type: string
+            description:
+              type: string
+            yaml:
+              type: string
+              maxLength: 1048576
+            createdAt:
+              type: string
+              format: date-time
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceServiceDetail"
+        ports:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspacePortDetail"
+        runtime:
+          type: object
+          additionalProperties: false
+          required: [state, activeOperationId]
+          properties:
+            state:
+              type: string
+              enum: [stopping, failed, starting, degraded, running, stopped]
+            activeOperationId:
+              oneOf:
+                - $ref: "#/components/schemas/OperationId"
+                - type: "null"
+    WorkspaceServiceDetail:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, driver, mode, runner, workingDirectory, required, dependsOn, readiness]
+      properties:
+        id:
+          $ref: "#/components/schemas/ManifestId"
+        displayName:
+          type: string
+        driver:
+          type: string
+          enum: [process, compose]
+        mode:
+          type: string
+          enum: [daemon, oneshot]
+        runner:
+          type: string
+        workingDirectory:
+          type: string
+        required:
+          type: boolean
+        dependsOn:
+          type: object
+          additionalProperties:
+            type: string
+        readiness:
+          type: string
+    WorkspacePortDetail:
+      type: object
+      additionalProperties: false
+      required: [name, protocol, conflictPolicy, exposure]
+      properties:
+        name:
+          $ref: "#/components/schemas/ManifestId"
+        protocol:
+          type: string
+          enum: [tcp]
+        preferred:
+          type: integer
+          minimum: 1024
+          maximum: 65535
+        fallbackRange:
+          type: string
+        conflictPolicy:
+          type: string
+        exposure:
+          type: string
+          enum: [loopback]
+    ServiceSummary:
+      type: object
+      additionalProperties: false
+      required: [ready, total]
+      properties:
+        ready:
+          type: integer
+          minimum: 0
+        total:
+          type: integer
+          minimum: 1
+    SystemSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - workspaceId
+        - workspacePath
+        - manifestStatus
+        - manifestDigest
+        - state
+        - serviceSummary
+        - activeOperationId
+        - updatedAt
+      properties:
+        id:
+          $ref: "#/components/schemas/ManifestId"
+        name:
+          type: string
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        workspacePath:
+          type: string
+        manifestStatus:
+          type: string
+          enum: [valid, invalid]
+        manifestDigest:
+          $ref: "#/components/schemas/Digest"
+        state:
+          type: string
+          const: stopped
+        serviceSummary:
+          $ref: "#/components/schemas/ServiceSummary"
+        activeOperationId:
+          type: [string, "null"]
+        updatedAt:
+          type: string
+          format: date-time
+    SystemList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SystemSummary"
+    ManifestSummary:
+      type: object
+      additionalProperties: false
+      required: [digest, apiVersion, createdAt]
+      properties:
+        digest:
+          $ref: "#/components/schemas/Digest"
+        apiVersion:
+          type: string
+          const: stackpilot.io/v1alpha1
+        createdAt:
+          type: string
+          format: date-time
+    ServiceDefinition:
+      type: object
+      additionalProperties: false
+      required: [id, driver, mode, required, definitionDigest]
+      properties:
+        id:
+          $ref: "#/components/schemas/ManifestId"
+        driver:
+          type: string
+          enum: [process, compose]
+        mode:
+          type: string
+          enum: [daemon, oneshot]
+        required:
+          type: boolean
+        definitionDigest:
+          $ref: "#/components/schemas/Digest"
+    SystemDetail:
+      type: object
+      additionalProperties: false
+      required: [system, manifest, services]
+      properties:
+        system:
+          $ref: "#/components/schemas/SystemSummary"
+        manifest:
+          $ref: "#/components/schemas/ManifestSummary"
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceDefinition"
+  responses:
+    Unauthorized:
+      description: Local token or browser session authentication failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Forbidden:
+      description: Browser origin or CSRF validation failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    ServiceUnavailable:
+      description: Authentication capacity is temporarily exhausted.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    HealthNotReady:
+      description: Persistence or initial reconciliation is not ready.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: HEALTH_NOT_READY
+              message: The control plane is not ready.
+              details: {}
+              traceId: tr_0123456789abcdef0123456789abcdef
+    BadRequest:
+      description: The request or manifest syntax is invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    NotFound:
+      description: The requested resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Conflict:
+      description: The request conflicts with current catalog state.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    UnprocessableManifest:
+      description: The manifest is structurally valid input but cannot be registered safely.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+x-stackpilot-error-codes:
+  AUTH_BOOTSTRAP_INVALID:
+    httpStatus: 401
+    retryable: false
+    allowedDetails: []
+  AUTH_CAPACITY_REACHED:
+    httpStatus: 503
+    retryable: true
+    allowedDetails: []
+  AUTH_SESSION_INVALID:
+    httpStatus: 401
+    retryable: false
+    allowedDetails: []
+  AUTH_TOKEN_INVALID:
+    httpStatus: 401
+    retryable: false
+    allowedDetails: []
+  EVENT_CURSOR_EXPIRED:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  LOG_CURSOR_EXPIRED:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  REQUEST_VALIDATION_FAILED:
+    httpStatus: 400
+    retryable: false
+    allowedDetails: []
+  RESOURCE_NOT_FOUND:
+    httpStatus: 404
+    retryable: false
+    allowedDetails: []
+  METHOD_NOT_ALLOWED:
+    httpStatus: 405
+    retryable: false
+    allowedDetails: []
+  FEATURE_NOT_ENABLED:
+    httpStatus: 422
+    retryable: false
+    allowedDetails:
+      - feature
+  COMPOSE_CONFIG_INVALID:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  COMPOSE_BUILD_CONFIG_INVALID:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  COMPOSE_BUILD_FAILED:
+    httpStatus: 422
+    retryable: true
+    allowedDetails: []
+  COMPOSE_BUILD_TIMEOUT:
+    httpStatus: 504
+    retryable: true
+    allowedDetails: []
+  COMPOSE_DISCOVERY_FAILED:
+    httpStatus: 503
+    retryable: true
+    allowedDetails: []
+  COMPOSE_INSPECT_FAILED:
+    httpStatus: 503
+    retryable: true
+    allowedDetails: []
+  COMPOSE_LOG_FOLLOW_FAILED:
+    httpStatus: 503
+    retryable: true
+    allowedDetails: []
+  COMPOSE_LIFECYCLE_INVALID:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  COMPOSE_LIFECYCLE_TIMEOUT:
+    httpStatus: 504
+    retryable: true
+    allowedDetails: []
+  COMPOSE_NOT_FOUND:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  COMPOSE_OVERRIDE_CONFLICT:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  COMPOSE_OVERRIDE_INVALID:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  COMPOSE_PREFLIGHT_TIMEOUT:
+    httpStatus: 504
+    retryable: true
+    allowedDetails: []
+  COMPOSE_PROJECT_IDENTITY_MISMATCH:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  COMPOSE_PROJECT_NOT_FOUND:
+    httpStatus: 409
+    retryable: true
+    allowedDetails: []
+  COMPOSE_START_FAILED:
+    httpStatus: 422
+    retryable: true
+    allowedDetails: []
+  COMPOSE_STOP_FAILED:
+    httpStatus: 409
+    retryable: true
+    allowedDetails: []
+  CONTAINER_UNHEALTHY:
+    httpStatus: 503
+    retryable: true
+    allowedDetails: []
+  COMPOSE_VERSION_UNSUPPORTED:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  DOCKER_DAEMON_UNAVAILABLE:
+    httpStatus: 503
+    retryable: true
+    allowedDetails: []
+  DOCKER_NOT_FOUND:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  DOCKER_VERSION_UNSUPPORTED:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  HEALTH_NOT_READY:
+    httpStatus: 503
+    retryable: true
+    allowedDetails: []
+  HEALTH_READINESS_TIMEOUT:
+    httpStatus: 504
+    retryable: true
+    allowedDetails: []
+  PROCESS_EXITED:
+    httpStatus: 409
+    retryable: true
+    allowedDetails: []
+  PROCESS_IDENTITY_MISMATCH:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  CONTROL_PLANE_RESTARTED:
+    httpStatus: 409
+    retryable: true
+    allowedDetails: []
+  SUPERVISOR_EXITED:
+    httpStatus: 409
+    retryable: true
+    allowedDetails: []
+  SUPERVISOR_UNAVAILABLE:
+    httpStatus: 503
+    retryable: true
+    allowedDetails: []
+  PROCESS_START_FAILED:
+    httpStatus: 422
+    retryable: true
+    allowedDetails: []
+  PROCESS_STOP_FAILED:
+    httpStatus: 409
+    retryable: true
+    allowedDetails: []
+  PORT_CONFLICT:
+    httpStatus: 409
+    retryable: true
+    allowedDetails:
+      - logicalPort
+      - port
+  TCP_REFUSED:
+    httpStatus: 503
+    retryable: true
+    allowedDetails: []
+  TCP_TIMEOUT:
+    httpStatus: 504
+    retryable: true
+    allowedDetails: []
+  HTTP_STATUS_MISMATCH:
+    httpStatus: 503
+    retryable: true
+    allowedDetails: []
+  HTTP_BODY_MISMATCH:
+    httpStatus: 503
+    retryable: true
+    allowedDetails: []
+  HTTP_TIMEOUT:
+    httpStatus: 504
+    retryable: true
+    allowedDetails: []
+  INTERNAL_ERROR:
+    httpStatus: 500
+    retryable: false
+    allowedDetails: []
+  SECRET_INVALID:
+    httpStatus: 400
+    retryable: false
+    allowedDetails: []
+  SECRET_NOT_FOUND:
+    httpStatus: 404
+    retryable: false
+    allowedDetails: []
+  SECRET_VERSION_CONFLICT:
+    httpStatus: 409
+    retryable: true
+    allowedDetails: []
+  MANIFEST_FILE_TOO_LARGE:
+    httpStatus: 400
+    retryable: false
+    allowedDetails:
+      - maxBytes
+  MANIFEST_NOT_REGULAR_FILE:
+    httpStatus: 400
+    retryable: false
+    allowedDetails: []
+  MANIFEST_YAML_INVALID:
+    httpStatus: 400
+    retryable: false
+    allowedDetails:
+      - location
+  MANIFEST_DUPLICATE_KEY:
+    httpStatus: 400
+    retryable: false
+    allowedDetails:
+      - location
+      - field
+  MANIFEST_UNKNOWN_FIELD:
+    httpStatus: 400
+    retryable: false
+    allowedDetails:
+      - location
+      - field
+  MANIFEST_MULTIPLE_DOCUMENTS:
+    httpStatus: 400
+    retryable: false
+    allowedDetails: []
+  MANIFEST_SCHEMA_INVALID:
+    httpStatus: 400
+    retryable: false
+    allowedDetails:
+      - location
+  MANIFEST_SEMANTIC_INVALID:
+    httpStatus: 422
+    retryable: false
+    allowedDetails:
+      - location
+      - field
+  MANIFEST_PATH_OUTSIDE_WORKSPACE:
+    httpStatus: 422
+    retryable: false
+    allowedDetails:
+      - location
+  MANIFEST_CYCLE_DETECTED:
+    httpStatus: 422
+    retryable: false
+    allowedDetails:
+      - location
+      - field
+  MANIFEST_REFERENCE_NOT_FOUND:
+    httpStatus: 422
+    retryable: false
+    allowedDetails:
+      - location
+      - field
+  MANIFEST_TEMPLATE_INVALID:
+    httpStatus: 422
+    retryable: false
+    allowedDetails:
+      - location
+      - field
+  MANIFEST_DURATION_INVALID:
+    httpStatus: 422
+    retryable: false
+    allowedDetails:
+      - location
+      - field
+  MANIFEST_PORT_RANGE_INVALID:
+    httpStatus: 422
+    retryable: false
+    allowedDetails:
+      - location
+      - field
+  MANIFEST_HEALTH_TARGET_UNSAFE:
+    httpStatus: 422
+    retryable: false
+    allowedDetails:
+      - location
+      - field
+  MANIFEST_CHANGED:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_ALREADY_REGISTERED:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_NOT_FOUND:
+    httpStatus: 404
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_MANIFEST_UNAVAILABLE:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_SYSTEM_ID_CHANGED:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_ID_REQUIRED:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_PATH_INVALID:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_SCRIPT_NOT_FOUND:
+    httpStatus: 404
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_SCRIPT_OUTSIDE:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_SCRIPT_TYPE_UNSUPPORTED:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_SCRIPT_ENCODING_UNSUPPORTED:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_SCRIPT_TOO_LARGE:
+    httpStatus: 413
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_SCRIPT_SYNTAX_UNSUPPORTED:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_SCRIPT_DANGEROUS:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_SCRIPT_REFERENCE_CYCLE:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_IMPORT_INCOMPLETE:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_IMPORT_PORT_UNCONFIRMED:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_IMPORT_DEPENDENCY_UNCONFIRMED:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_IMPORT_SOURCE_CHANGED:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_IMPORT_DRAFT_EXPIRED:
+    httpStatus: 410
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_MANIFEST_CONFLICT:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_MANIFEST_WRITE_FAILED:
+    httpStatus: 500
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_EDIT_RUNTIME_ACTIVE:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_UNREGISTER_RUNTIME_ACTIVE:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  WORKSPACE_RELINK_SYSTEM_MISMATCH:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  OPERATION_ALREADY_ACTIVE:
+    httpStatus: 409
+    retryable: true
+    allowedDetails: []
+  IDEMPOTENCY_KEY_REUSED:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  OPERATION_NOT_FOUND:
+    httpStatus: 404
+    retryable: false
+    allowedDetails: []
+  OPERATION_NOT_CANCELLABLE:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  OPERATION_INVALID_STATE:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  RUNNER_NOT_FOUND:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  RUNNER_VERSION_CHECK_FAILED:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  RUNNER_VERSION_CHECK_TIMEOUT:
+    httpStatus: 504
+    retryable: true
+    allowedDetails: []
+  RUNNER_PATH_UNSAFE:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  PLATFORM_NOT_SUPPORTED:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  AUTH_BROWSER_REQUEST_REJECTED:
+    httpStatus: 403
+    retryable: false
+    allowedDetails: []

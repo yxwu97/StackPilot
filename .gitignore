@@ -1,9 +1,12 @@
 .tools/
 .cache/
+.local/
 /dist/
 /web/dist/*
 !/web/dist/embed-placeholder.txt
 node_modules/
+.playwright-cli/
+/output/
 *.log
 *.tmp
 

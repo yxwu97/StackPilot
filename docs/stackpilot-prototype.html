@@ -729,7 +729,7 @@
                   <tr class="row-clickable system-row" data-system="pms" data-status="running" data-search="pms e:\bidtravelcloud\pms">
                     <td><div class="system-cell"><div class="system-icon pms">PMS</div><div><div class="cell-title">PMS</div><div class="cell-subtitle">项目管理系统</div></div></div></td>
                     <td><span class="status-pill running"><span class="status-dot"></span>运行中</span></td><td>3 / 3 就绪</td><td class="mono">02:41:18</td>
-                    <td><button class="link-button" data-toast="已在新标签打开 http://127.0.0.1:5173">127.0.0.1:5173<svg class="icon"><use href="#i-external"/></svg></button></td>
+                    <td><button class="link-button" data-toast="已在新标签打开 http://127.0.0.1:32102">127.0.0.1:32102<svg class="icon"><use href="#i-external"/></svg></button></td>
                     <td><span class="mono muted">E:\BidTravelCloud\PMS</span></td>
                     <td><div class="row-actions"><button class="icon-button" title="停止 PMS" aria-label="停止 PMS" data-toast="PMS 停止操作已排队"><svg class="icon"><use href="#i-square"/></svg></button><button class="icon-button" title="更多操作" aria-label="PMS 更多操作"><svg class="icon"><use href="#i-more"/></svg></button></div></td>
                   </tr>
@@ -795,7 +795,7 @@
                     </button>
                     <button class="service-node web" data-service="web" aria-label="查看 Web 服务详情">
                       <div class="node-top"><strong>Web</strong><span class="status-pill stopped web-status"><span class="status-dot"></span><span>已停止</span></span></div>
-                      <div class="node-meta"><span>Process · npm</span><span class="web-port mono">:5173</span></div>
+                      <div class="node-meta"><span>Process · npm</span><span class="web-port mono">:32102</span></div>
                     </button>
                   </div>
                 </div>
@@ -818,7 +818,7 @@
               <div class="surface-header"><div><h2>服务状态</h2><p>状态由进程身份和健康检查共同确认</p></div></div>
               <div class="table-wrap"><table><thead><tr><th>服务</th><th>状态</th><th>驱动</th><th>端口</th><th>健康检查</th><th>PID</th><th style="text-align:right">操作</th></tr></thead><tbody>
                 <tr class="row-clickable" data-service="backend"><td><div class="cell-title">Backend</div><div class="cell-subtitle">必需服务</div></td><td><span class="status-pill stopped backend-status"><span class="status-dot"></span><span>已停止</span></span></td><td>Process / Maven</td><td class="mono backend-port">8081</td><td class="backend-health muted">未运行</td><td class="mono backend-pid">--</td><td><div class="row-actions"><button class="icon-button" title="查看 Backend" aria-label="查看 Backend 服务"><svg class="icon"><use href="#i-chevron"/></svg></button></div></td></tr>
-                <tr class="row-clickable" data-service="web"><td><div class="cell-title">Web</div><div class="cell-subtitle">依赖 Backend ready</div></td><td><span class="status-pill stopped web-status"><span class="status-dot"></span><span>已停止</span></span></td><td>Process / npm</td><td class="mono web-port">5173</td><td class="web-health muted">未运行</td><td class="mono web-pid">--</td><td><div class="row-actions"><button class="icon-button" title="查看 Web" aria-label="查看 Web 服务"><svg class="icon"><use href="#i-chevron"/></svg></button></div></td></tr>
+                <tr class="row-clickable" data-service="web"><td><div class="cell-title">Web</div><div class="cell-subtitle">依赖 Backend ready</div></td><td><span class="status-pill stopped web-status"><span class="status-dot"></span><span>已停止</span></span></td><td>Process / npm</td><td class="mono web-port">32102</td><td class="web-health muted">未运行</td><td class="mono web-pid">--</td><td><div class="row-actions"><button class="icon-button" title="查看 Web" aria-label="查看 Web 服务"><svg class="icon"><use href="#i-chevron"/></svg></button></div></td></tr>
               </tbody></table></div>
             </div>
           </div>
@@ -828,7 +828,7 @@
               <div class="surface-header"><div><h2>端口计划</h2><p>启动前一次性规划，粘性复用已开启</p></div><button class="button small" id="preview-port-plan"><svg class="icon"><use href="#i-port"/></svg>重新规划</button></div>
               <div class="table-wrap"><table><thead><tr><th>名称</th><th>服务</th><th>首选端口</th><th>解析端口</th><th>策略</th><th>传播目标</th></tr></thead><tbody>
                 <tr><td class="cell-title">backend</td><td>Backend</td><td class="mono">8081</td><td class="mono backend-port">8081</td><td><span class="status-pill ready"><span class="status-dot"></span>可用</span></td><td>SERVER_PORT、readiness、Vite proxy</td></tr>
-                <tr><td class="cell-title">web</td><td>Web</td><td class="mono">5173</td><td class="mono web-port">5173</td><td><span class="status-pill warning"><span class="status-dot"></span>自动替换</span></td><td>Vite --port、访问入口、CORS</td></tr>
+                <tr><td class="cell-title">web</td><td>Web</td><td class="mono">32102</td><td class="mono web-port">32102</td><td><span class="status-pill warning"><span class="status-dot"></span>自动替换</span></td><td>Vite --port、访问入口、CORS</td></tr>
               </tbody></table></div>
             </div>
           </div>
@@ -956,7 +956,7 @@ spec:
                 <ol class="timeline" id="operation-timeline">
                   <li class="timeline-item"><span class="timeline-dot pending">1</span><div><div class="timeline-title">校验清单与调用权限</div><div class="timeline-note">等待执行</div></div><span class="muted mono">--</span></li>
                   <li class="timeline-item"><span class="timeline-dot pending">2</span><div><div class="timeline-title">解析 Runner 和工作目录</div><div class="timeline-note">等待执行</div></div><span class="muted mono">--</span></li>
-                  <li class="timeline-item"><span class="timeline-dot pending">3</span><div><div class="timeline-title">规划端口并创建租约</div><div class="timeline-note">Web 首选 5173 已占用，将使用 5201</div></div><span class="muted mono">--</span></li>
+                  <li class="timeline-item"><span class="timeline-dot pending">3</span><div><div class="timeline-title">规划端口并创建租约</div><div class="timeline-note">Web 首选 32102 已占用，将使用 32201</div></div><span class="muted mono">--</span></li>
                   <li class="timeline-item"><span class="timeline-dot pending">4</span><div><div class="timeline-title">启动 Backend</div><div class="timeline-note">等待 HTTP readiness</div></div><span class="muted mono">--</span></li>
                   <li class="timeline-item"><span class="timeline-dot pending">5</span><div><div class="timeline-title">启动 Web</div><div class="timeline-note">仅在 Backend ready 后执行</div></div><span class="muted mono">--</span></li>
                 </ol>
@@ -1090,7 +1090,7 @@ spec:
       <div class="modal-body">
         <div class="form-group"><label class="form-label" for="start-workspace">工作区</label><select id="start-workspace"><option>BTC Local · E:\BidTravelCloud\BTC</option></select></div>
         <div class="form-group"><span class="form-label">启动失败时</span><div class="segmented"><label class="segment-option"><input type="radio" name="failure-policy" value="keep" checked><span class="segment-title">保留就绪服务</span><span class="segment-note">保留现场，便于查看日志</span></label><label class="segment-option"><input type="radio" name="failure-policy" value="cleanup"><span class="segment-title">停止本次服务</span><span class="segment-note">失败后清理本次启动内容</span></label></div></div>
-        <div class="form-group"><span class="form-label">端口计划</span><div class="port-plan"><div class="port-row"><div><strong>Backend</strong><div class="cell-subtitle">首选 8081</div></div><input id="start-backend-port" type="number" value="8081" aria-label="Backend 端口"><span class="status-pill ready"><span class="status-dot"></span>可用</span></div><div class="port-row"><div><strong>Web</strong><div class="cell-subtitle">首选 5173</div></div><input id="start-web-port" type="number" value="5201" aria-label="Web 端口"><span class="status-pill warning"><span class="status-dot"></span>已替换</span></div></div><div class="conflict-note"><svg class="icon"><use href="#i-alert"/></svg><span>5173 已由 PMS Web 占用。根据 BTC 的自动端口策略，本次分配 5201，并同步更新 Vite proxy、CORS 和访问入口。</span></div></div>
+        <div class="form-group"><span class="form-label">端口计划</span><div class="port-plan"><div class="port-row"><div><strong>Backend</strong><div class="cell-subtitle">首选 8081</div></div><input id="start-backend-port" type="number" value="8081" aria-label="Backend 端口"><span class="status-pill ready"><span class="status-dot"></span>可用</span></div><div class="port-row"><div><strong>Web</strong><div class="cell-subtitle">首选 32102</div></div><input id="start-web-port" type="number" value="32201" aria-label="Web 端口"><span class="status-pill warning"><span class="status-dot"></span>已替换</span></div></div><div class="conflict-note"><svg class="icon"><use href="#i-alert"/></svg><span>32102 已由 PMS Web 占用。根据 BTC 的自动端口策略，本次分配 32201，并同步更新 Vite proxy、CORS 和访问入口。</span></div></div>
       </div>
       <div class="modal-footer"><button class="button" data-close-modal="start-modal">取消</button><button class="button primary" id="confirm-start" data-testid="confirm-start"><svg class="icon"><use href="#i-play"/></svg>启动系统</button></div>
     </div>
@@ -1128,7 +1128,7 @@ spec:
       elapsedTimer: null,
       elapsedSeconds: 0,
       logSequence: 0,
-      port: { backend: 8081, web: 5201 }
+      port: { backend: 8081, web: 32201 }
     };
 
     const labels = {
@@ -1356,7 +1356,7 @@ spec:
         if (index < Math.min(step + 1, timeline.length)) {
           dot.className = 'timeline-dot';
           dot.textContent = '✓';
-          item.querySelector('.timeline-note').textContent = index === 2 ? 'Web 端口已从 5173 调整为 5201' : '已完成';
+          item.querySelector('.timeline-note').textContent = index === 2 ? 'Web 端口已从 32102 调整为 32201' : '已完成';
           item.querySelector('.muted').textContent = ['0.2s','0.1s','0.5s','4.2s','1.8s'][index];
         }
       });
@@ -1364,7 +1364,7 @@ spec:
 
     function startSystem() {
       state.port.backend = Number(document.getElementById('start-backend-port').value) || 8081;
-      state.port.web = Number(document.getElementById('start-web-port').value) || 5201;
+      state.port.web = Number(document.getElementById('start-web-port').value) || 32201;
       closeModal('start-modal');
       navigate('system');
       state.systemState = 'starting';
@@ -1539,17 +1539,17 @@ spec:
       },
       'btc-port': {
         summary: 'BTC Web 首选端口冲突已被端口规划器解决',
-        description: 'PMS Web 已租用 5173。BTC 根据 auto 策略改用 5201，Vite 监听、后端代理、CORS 和访问入口均已同步，无需人工释放端口。',
+        description: 'PMS Web 已租用 32102。BTC 根据 auto 策略改用 32201，Vite 监听、后端代理、CORS 和访问入口均已同步，无需人工释放端口。',
         causes: [
-          ['PMS 工作区的粘性端口租约仍有效', 'PMS Web 正在 5173 正常监听', 99],
-          ['两个系统的清单使用相同首选端口', 'PMS 与 BTC 均声明 Web preferred: 5173', 98]
+          ['PMS 工作区的粘性端口租约仍有效', 'PMS Web 正在 32102 正常监听', 99],
+          ['两个系统的清单使用相同首选端口', 'PMS 与 BTC 均声明 Web preferred: 32102', 98]
         ],
         evidence: [
-          ['port', '监听端口占用者', 'PMS / web · PID 21984 · 127.0.0.1:5173', 'port-5173'],
-          ['file', 'BTC 端口策略', 'conflictPolicy: auto · fallbackRange: 5200-5299', 'manifest-btc'],
-          ['check', '传播校验通过', 'Vite、proxy、CORS、访问入口均解析为 5201', 'plan-118']
+          ['port', '监听端口占用者', 'PMS / web · PID 21984 · 127.0.0.1:32102', 'port-32102'],
+          ['file', 'BTC 端口策略', 'conflictPolicy: auto · fallbackRange: 32200-32399', 'manifest-btc'],
+          ['check', '传播校验通过', 'Vite、proxy、CORS、访问入口均解析为 32201', 'plan-118']
         ],
-        action: '保留当前自动分配结果', actionNote: '粘性端口会在下次启动优先复用 5201', reference: 'plan-118'
+        action: '保留当前自动分配结果', actionNote: '粘性端口会在下次启动优先复用 32201', reference: 'plan-118'
       },
       'pms-rag': {
         summary: 'PMS RAG 健康检查在模型加载阶段出现短时抖动',
@@ -1667,7 +1667,7 @@ spec:
     document.getElementById('confirm-stop').addEventListener('click', stopSystem);
     document.getElementById('refresh-systems').addEventListener('click', () => showToast('3 个系统清单已刷新。'));
     document.getElementById('refresh-manifest').addEventListener('click', () => showToast('BTC 清单校验通过，缓存已更新。'));
-    document.getElementById('preview-port-plan').addEventListener('click', () => { document.querySelector('[data-system-tab="services"]').click(); showToast('端口计划已重新检查：5173 冲突，继续使用 5201。', 'warning'); });
+    document.getElementById('preview-port-plan').addEventListener('click', () => { document.querySelector('[data-system-tab="services"]').click(); showToast('端口计划已重新检查：32102 冲突，继续使用 32201。', 'warning'); });
 
     document.querySelectorAll('[data-service]').forEach(row => row.addEventListener('click', event => { if (event.target.closest('button') && !event.currentTarget.classList.contains('service-node')) return; state.selectedService = row.dataset.service; state.logSelection.clear(); navigate('service'); }));
     document.querySelectorAll('[data-system-tab]').forEach(button => button.addEventListener('click', () => {

@@ -1,0 +1,61 @@
+apiVersion: stackpilot.io/v1alpha1
+kind: System
+metadata:
+  id: btc
+  name: BidTravel Cloud
+  description: Phase 1 BTC Backend and Web process orchestration definition.
+spec:
+  policies:
+    failFast: true
+    cleanupOnFailure: false
+    keepReadyServices: true
+    stickyPorts: true
+  ports:
+    backend:
+      protocol: tcp
+      preferred: 8081
+      fallbackRange: 8200-8399
+      conflictPolicy: auto
+      exposure: loopback
+    web:
+      protocol: tcp
+      preferred: 32102
+      fallbackRange: 32200-32399
+      conflictPolicy: auto
+      exposure: loopback
+  services:
+    backend:
+      displayName: BTC Backend
+      required: true
+      driver: process
+      mode: daemon
+      runner: maven
+      workingDirectory: ./bidtravel-backend
+      arguments: [spring-boot:run]
+      environment:
+        SERVER_PORT: "${ports.backend}"
+        BIDTRAVEL_CORS_ALLOWED_ORIGINS: "http://127.0.0.1:${ports.web}"
+      readiness:
+        type: http
+        url: "http://127.0.0.1:${ports.backend}/actuator/health"
+        timeout: 180s
+        interval: 2s
+      stop:
+        gracefulTimeout: 15s
+    web:
+      displayName: BTC Web
+      required: true
+      driver: process
+      mode: daemon
+      runner: npm
+      workingDirectory: ./bidtravel-frontend
+      arguments: [run, dev, --, --host, 127.0.0.1, --port, "${ports.web}"]
+      environment:
+        VITE_API_TARGET: "http://127.0.0.1:${ports.backend}"
+      dependsOn:
+        backend: ready
+      readiness:
+        type: http
+        url: "http://127.0.0.1:${ports.web}"
+        timeout: 120s
+        interval: 2s

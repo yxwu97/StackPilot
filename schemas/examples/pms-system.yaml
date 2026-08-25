@@ -1,0 +1,43 @@
+apiVersion: stackpilot.io/v1alpha1
+kind: System
+metadata:
+  id: pms
+  name: PMSystem
+spec:
+  policies:
+    stickyPorts: true
+  ports:
+    backend: {protocol: tcp, preferred: 8080, fallbackRange: 8000-8099, conflictPolicy: auto, exposure: loopback}
+    rag: {protocol: tcp, preferred: 8100, fallbackRange: 8101-8199, conflictPolicy: auto, exposure: loopback}
+    web: {protocol: tcp, preferred: 32102, fallbackRange: 32400-32599, conflictPolicy: auto, exposure: loopback}
+  services:
+    backend:
+      driver: process
+      runner: maven
+      workingDirectory: ./pmsystem-backend
+      arguments: [spring-boot:run]
+      environment:
+        SERVER_PORT: "${ports.backend}"
+        PM_KNOWLEDGE_RAG_BASE_URL: "http://127.0.0.1:${ports.rag}"
+        PM_KNOWLEDGE_RAG_TOKEN: "${secret.pms-rag-service-token}"
+      readiness: {type: http, url: "http://127.0.0.1:${ports.backend}/actuator/health", timeout: 5m, interval: 2s}
+    rag:
+      driver: process
+      runner: python-venv
+      virtualEnvironment: ./pmsystem-rag/.venv
+      workingDirectory: ./pmsystem-rag
+      arguments: [-m, app.main]
+      environment:
+        RAG_PORT: "${ports.rag}"
+        RAG_SERVICE_TOKEN: "${secret.pms-rag-service-token}"
+        DASHSCOPE_API_KEY: "${secret.pms-dashscope-api-key}"
+      readiness: {type: http, url: "http://127.0.0.1:${ports.rag}/health", timeout: 3m, interval: 2s}
+    web:
+      driver: process
+      runner: npm
+      workingDirectory: ./pmsystem-frontend
+      arguments: [run, dev, --, --host, 127.0.0.1, --port, "${ports.web}", --strictPort]
+      environment:
+        VITE_API_TARGET: "http://127.0.0.1:${ports.backend}"
+      dependsOn: {backend: ready, rag: ready}
+      readiness: {type: http, url: "http://127.0.0.1:${ports.web}", timeout: 2m, interval: 2s}
