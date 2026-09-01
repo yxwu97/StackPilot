@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>StackPilot - 可观测性与变更规划原型</title>
+  <style>
+    :root {
+      --bg: #f4f6f3;
+      --surface: #ffffff;
+      --surface-soft: #f8faf8;
+      --ink: #19211d;
+      --muted: #68736d;
+      --subtle: #8c9690;
+      --line: #dce2dd;
+      --line-strong: #c8d1ca;
+      --nav: #202722;
+      --nav-soft: #2b342e;
+      --nav-text: #e9eee9;
+      --accent: #0f766e;
+      --accent-dark: #0b5f59;
+      --accent-soft: #e7f4f1;
+      --blue: #2563a9;
+      --blue-soft: #eaf2fb;
+      --success: #227a4b;
+      --success-soft: #e9f6ee;
+      --warning: #a2600f;
+      --warning-soft: #fff3db;
+      --danger: #b23a36;
+      --danger-soft: #fdecea;
+      --purple: #6b4fa3;
+      --purple-soft: #f1ecf9;
+      --shadow: 0 12px 32px rgba(25, 33, 29, .12);
+      --sidebar-width: 224px;
+    }
+
+    * { box-sizing: border-box; }
+    html { color-scheme: light; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+    }
+    button, input, select { font: inherit; }
+    button:focus-visible, select:focus-visible, input:focus-visible {
+      outline: 3px solid rgba(15, 118, 110, .18);
+      outline-offset: 2px;
+    }
+    .icon { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .mono { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; }
+    .muted { color: var(--muted); }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+    .sidebar {
+      position: fixed;
+      inset: 0 auto 0 0;
+      z-index: 30;
+      display: flex;
+      flex-direction: column;
+      width: var(--sidebar-width);
+      color: var(--nav-text);
+      background: var(--nav);
+      border-right: 1px solid #111713;
+    }
+    .brand { display: flex; align-items: center; gap: 11px; height: 68px; padding: 0 20px; border-bottom: 1px solid rgba(255,255,255,.08); }
+    .brand-mark { position: relative; width: 28px; height: 28px; flex: 0 0 auto; }
+    .brand-mark span { position: absolute; left: 5px; width: 18px; height: 7px; border: 2px solid #8ed1c4; border-radius: 2px; }
+    .brand-mark span:nth-child(1) { top: 1px; }
+    .brand-mark span:nth-child(2) { top: 10px; left: 2px; }
+    .brand-mark span:nth-child(3) { top: 19px; left: 8px; }
+    .brand strong { display: block; font-size: 17px; letter-spacing: 0; }
+    .brand small { display: block; color: #9eaaa3; font-size: 11px; }
+    .nav-label { padding: 22px 20px 8px; color: #849188; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .nav { display: grid; gap: 4px; padding: 0 10px; }
+    .nav-button {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      width: 100%;
+      min-height: 42px;
+      padding: 0 12px;
+      color: #b9c4bd;
+      background: transparent;
+      border: 0;
+      border-radius: 6px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .nav-button:hover { color: #fff; background: rgba(255,255,255,.05); }
+    .nav-button.active { color: #fff; background: var(--nav-soft); box-shadow: inset 3px 0 #66b9ab; }
+    .nav-button span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nav-badge { margin-left: auto; min-width: 20px; padding: 1px 6px; color: #ffd59d; background: rgba(162,96,15,.26); border-radius: 9px; font-size: 11px; text-align: center; }
+    .control-state { margin: auto 12px 14px; padding: 12px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.08); border-radius: 6px; }
+    .control-state div { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+    .control-state p { margin: 7px 0 0; color: #8f9c94; font-size: 11px; line-height: 1.45; }
+
+    .main-shell { min-height: 100vh; margin-left: var(--sidebar-width); }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      height: 68px;
+      padding: 0 28px;
+      background: rgba(255,255,255,.96);
+      border-bottom: 1px solid var(--line);
+    }
+    .top-context { min-width: 180px; }
+    .top-context strong { display: block; font-size: 14px; }
+    .top-context span { color: var(--muted); font-size: 12px; }
+    .prototype-chip { padding: 4px 8px; color: var(--purple); background: var(--purple-soft); border: 1px solid #d9cdec; border-radius: 4px; font-size: 11px; font-weight: 700; }
+    .scope-banner { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px 14px; background: var(--blue-soft); border: 1px solid #cbdcf0; border-radius: 6px; }
+    .scope-banner.warning { background: var(--warning-soft); border-color: #efd5a2; }
+    .scope-banner strong { display: block; font-size: 12px; }
+    .scope-banner p { margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .source-tag { display: inline-flex; align-items: center; min-height: 20px; padding: 2px 6px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--muted); background: var(--surface-soft); font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .source-tag.existing { color: var(--success); background: var(--success-soft); border-color: #c8e5d3; }
+    .source-tag.planned { color: var(--warning); background: var(--warning-soft); border-color: #efd5a2; }
+    .source-tag.fixture { color: var(--purple); background: var(--purple-soft); border-color: #d9cdec; }
+    .global-search { position: relative; width: min(400px, 38vw); margin-left: auto; }
+    .global-search .icon { position: absolute; left: 11px; top: 10px; color: var(--subtle); pointer-events: none; }
+    .global-search input { width: 100%; height: 36px; padding: 0 12px 0 36px; color: var(--ink); background: var(--surface-soft); border: 1px solid var(--line); border-radius: 6px; }
+    .avatar { display: grid; place-items: center; width: 32px; height: 32px; color: #284a3b; background: #dbe8e2; border-radius: 50%; font-size: 12px; font-weight: 700; }
+    .content { width: min(1480px, 100%); margin: 0 auto; padding: 26px 28px 56px; }
+
+    .breadcrumb { display: flex; align-items: center; gap: 7px; margin-bottom: 12px; color: var(--muted); font-size: 12px; }
+    .breadcrumb button { padding: 0; color: var(--accent); background: none; border: 0; cursor: pointer; }
+    .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+    .page-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+    h1 { margin: 0; font-size: 24px; line-height: 1.25; letter-spacing: 0; }
+    h2 { margin: 0; font-size: 16px; letter-spacing: 0; }
+    h3 { margin: 0; font-size: 14px; letter-spacing: 0; }
+    .page-header p { margin: 6px 0 0; color: var(--muted); }
+    .header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 36px;
+      padding: 0 13px;
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      font-weight: 650;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .button:hover { background: var(--surface-soft); border-color: #aeb9b1; }
+    .button.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+    .button.primary:hover { background: var(--accent-dark); }
+    .button.danger { color: var(--danger); border-color: #e5b4b1; }
+    .button.danger:hover { background: var(--danger-soft); }
+    .button.small { min-height: 30px; padding: 0 9px; font-size: 12px; }
+    .button:disabled { opacity: .45; cursor: not-allowed; }
+    .icon-button { display: inline-grid; place-items: center; width: 36px; height: 36px; padding: 0; color: var(--muted); background: #fff; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+    .icon-button:hover { color: var(--ink); background: var(--surface-soft); border-color: var(--line-strong); }
+    select { min-height: 36px; padding: 0 34px 0 10px; color: var(--ink); background: #fff; border: 1px solid var(--line-strong); border-radius: 6px; }
+
+    .status-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 650; white-space: nowrap; }
+    .status-pill.success { color: var(--success); background: var(--success-soft); }
+    .status-pill.warning { color: var(--warning); background: var(--warning-soft); }
+    .status-pill.danger { color: var(--danger); background: var(--danger-soft); }
+    .status-pill.info { color: var(--blue); background: var(--blue-soft); }
+    .status-pill.neutral { color: #657069; background: #edf0ee; }
+    .status-dot { width: 7px; height: 7px; flex: 0 0 auto; background: currentColor; border-radius: 50%; }
+    .status-dot.pulse { animation: pulse 1.5s infinite; }
+    @keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(37, 99, 169, .13); } }
+
+    .workflow-strip { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+    .workflow-step { position: relative; display: flex; align-items: center; gap: 10px; min-height: 58px; padding: 10px 16px; border-right: 1px solid var(--line); }
+    .workflow-step:last-child { border-right: 0; }
+    .workflow-step.active { background: var(--accent-soft); }
+    .workflow-index { display: grid; place-items: center; width: 26px; height: 26px; flex: 0 0 auto; color: var(--muted); background: #edf0ee; border-radius: 50%; font-size: 12px; font-weight: 750; }
+    .workflow-step.done .workflow-index { color: #fff; background: var(--success); }
+    .workflow-step.active .workflow-index { color: #fff; background: var(--accent); }
+    .workflow-step strong { display: block; font-size: 12px; }
+    .workflow-step span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+
+    .tabs { display: flex; gap: 2px; margin-bottom: 18px; padding: 0 2px; border-bottom: 1px solid var(--line-strong); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab-button { position: relative; min-height: 42px; padding: 0 15px; color: var(--muted); background: transparent; border: 0; cursor: pointer; white-space: nowrap; }
+    .tab-button.active { color: var(--accent); font-weight: 700; }
+    .tab-button.active::after { position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; background: var(--accent); content: ""; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; animation: panel-in .16s ease; }
+    @keyframes panel-in { from { opacity: .6; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+
+    .metric-band { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+    .metric-item { min-width: 0; padding: 16px 18px; border-right: 1px solid var(--line); }
+    .metric-item:last-child { border-right: 0; }
+    .metric-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
+    .metric-value { margin-top: 8px; font-size: 24px; font-weight: 720; line-height: 1; }
+    .metric-value small { margin-left: 3px; color: var(--muted); font-size: 12px; font-weight: 500; }
+    .metric-trend { margin-top: 7px; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .split-layout { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, .8fr); gap: 16px; margin-bottom: 16px; }
+    .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+    .panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; min-height: 58px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    .panel-header p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .panel-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+    .panel-body { padding: 16px; }
+    .segment { display: inline-flex; padding: 2px; background: #edf0ee; border-radius: 6px; }
+    .segment button { min-width: 42px; height: 28px; padding: 0 8px; color: var(--muted); background: transparent; border: 0; border-radius: 4px; cursor: pointer; font-size: 11px; }
+    .segment button.active { color: var(--ink); background: #fff; box-shadow: 0 1px 3px rgba(25,33,29,.12); font-weight: 700; }
+
+    .chart-wrap { position: relative; height: 252px; }
+    .chart-unavailable { position: absolute; inset: 34px 30px 50px 46px; z-index: 2; display: none; place-items: center; padding: 18px; color: var(--muted); background: rgba(248,250,248,.92); border: 1px dashed var(--line-strong); border-radius: 5px; text-align: center; }
+    .chart-unavailable.visible { display: grid; }
+    .chart-unavailable strong { display: block; margin-bottom: 5px; color: var(--ink); font-size: 12px; }
+    .chart-wrap.unavailable > svg,
+    .chart-wrap.unavailable > .chart-axis,
+    .chart-wrap.unavailable > .chart-legend,
+    .chart-wrap.unavailable > .chart-y { display: none; }
+    .chart-wrap.unavailable .chart-unavailable { inset: 16px; }
+    .chart-wrap svg { display: block; width: 100%; height: 214px; overflow: visible; }
+    .chart-grid line { stroke: #e6ebe7; stroke-width: 1; }
+    .chart-axis { display: flex; justify-content: space-between; margin: -1px 0 0 46px; color: var(--subtle); font-size: 10px; }
+    .chart-y { position: absolute; top: 8px; bottom: 38px; left: 0; display: flex; flex-direction: column; justify-content: space-between; color: var(--subtle); font-size: 10px; }
+    .chart-line { fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+    .chart-line.cpu { stroke: var(--accent); }
+    .chart-line.memory { stroke: var(--purple); }
+    .chart-area { fill: rgba(15,118,110,.07); stroke: none; }
+    .chart-legend { display: flex; align-items: center; gap: 18px; margin-top: 2px; color: var(--muted); font-size: 11px; }
+    .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+    .legend-line { width: 18px; height: 3px; background: var(--accent); border-radius: 2px; }
+    .legend-line.memory { background: var(--purple); }
+
+    .health-summary { display: flex; align-items: center; gap: 14px; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid var(--line); }
+    .coverage-ring { display: grid; place-items: center; width: 64px; height: 64px; flex: 0 0 auto; border: 7px solid #d7ebe1; border-top-color: var(--success); border-right-color: var(--success); border-radius: 50%; }
+    .coverage-ring.warning { border-color: #f4e1bd; border-top-color: var(--warning); }
+    .coverage-ring strong { font-size: 13px; }
+    .health-summary p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .compact-list { display: grid; gap: 0; }
+    .compact-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; min-height: 48px; border-bottom: 1px solid var(--line); }
+    .compact-row:last-child { border-bottom: 0; }
+    .compact-row strong { display: block; font-size: 12px; }
+    .compact-row span { color: var(--muted); font-size: 11px; }
+
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th { padding: 10px 12px; color: var(--muted); background: var(--surface-soft); border-bottom: 1px solid var(--line); font-size: 11px; font-weight: 700; text-align: left; white-space: nowrap; }
+    td { padding: 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .service-name { font-weight: 700; }
+    .service-sub { margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .meter { width: 86px; height: 5px; margin-top: 5px; background: #e8ece9; border-radius: 3px; overflow: hidden; }
+    .meter span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+    .meter.memory span { background: var(--purple); }
+
+    .revision-grid { display: grid; grid-template-columns: 1fr 54px 1fr; align-items: stretch; gap: 0; margin-bottom: 16px; }
+    .revision-column { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+    .revision-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 60px; padding: 13px 16px; background: var(--surface-soft); border-bottom: 1px solid var(--line); }
+    .revision-title p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+    .revision-arrow { display: grid; place-items: center; color: var(--subtle); }
+    .revision-facts { margin: 0; }
+    .revision-fact { display: grid; grid-template-columns: 116px minmax(0,1fr); gap: 16px; min-height: 48px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+    .revision-fact:last-child { border-bottom: 0; }
+    .revision-fact dt { color: var(--muted); font-size: 12px; }
+    .revision-fact dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+
+    .notice { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 16px; padding: 12px 14px; color: #6a480d; background: var(--warning-soft); border: 1px solid #efd5a2; border-radius: 6px; }
+    .notice.danger { color: #7c2c29; background: var(--danger-soft); border-color: #efc0bd; }
+    .notice.info { color: #214f82; background: var(--blue-soft); border-color: #cbdcf0; }
+    .notice p { margin: 3px 0 0; font-size: 12px; line-height: 1.5; }
+
+    .plan-empty { display: grid; place-items: center; min-height: 360px; padding: 42px 20px; text-align: center; }
+    .empty-icon { display: grid; place-items: center; width: 54px; height: 54px; margin-bottom: 14px; color: var(--accent); background: var(--accent-soft); border-radius: 50%; }
+    .plan-empty p { max-width: 520px; margin: 7px auto 18px; color: var(--muted); line-height: 1.55; }
+    .plan-result { display: none; }
+    .plan-result.visible { display: block; }
+    .plan-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; margin-bottom: 16px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+    .plan-summary h2 { display: flex; align-items: center; gap: 9px; }
+    .plan-summary p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+    .plan-meta { display: flex; align-items: center; gap: 18px; color: var(--muted); font-size: 11px; }
+    .risk-badge { display: inline-flex; align-items: center; min-height: 26px; padding: 3px 9px; border-radius: 4px; font-size: 11px; font-weight: 750; }
+    .risk-badge.low { color: var(--success); background: var(--success-soft); }
+    .risk-badge.medium { color: var(--warning); background: var(--warning-soft); }
+    .risk-badge.high, .risk-badge.blocked { color: var(--danger); background: var(--danger-soft); }
+    .change-kind { display: inline-flex; min-width: 54px; justify-content: center; padding: 3px 7px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+    .change-kind.changed { color: var(--warning); background: var(--warning-soft); }
+    .change-kind.added { color: var(--success); background: var(--success-soft); }
+    .change-kind.blocked { color: var(--danger); background: var(--danger-soft); }
+
+    .modal-backdrop { position: fixed; inset: 0; z-index: 80; display: none; align-items: center; justify-content: center; padding: 18px; background: rgba(14, 19, 16, .48); }
+    .modal-backdrop.open { display: flex; }
+    .modal { width: min(620px, 100%); max-height: calc(100vh - 36px); overflow: auto; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); }
+    .modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+    .modal-header p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+    .modal-body { padding: 18px 20px; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; background: var(--surface-soft); border-top: 1px solid var(--line); }
+    .check-list { display: grid; gap: 10px; margin: 0 0 18px; padding: 0; list-style: none; }
+    .check-list li { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 38px; padding: 7px 10px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 5px; }
+    .confirm-row { display: flex; align-items: flex-start; gap: 9px; }
+    .confirm-row input { margin-top: 3px; }
+    .confirm-row label { color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+    .operation-drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 90; width: min(460px, 100%); padding: 0; visibility: hidden; pointer-events: none; background: #fff; border-left: 1px solid var(--line); box-shadow: -12px 0 32px rgba(25,33,29,.14); transform: translateX(105%); transition: transform .22s ease, visibility 0s linear .22s; }
+    .operation-drawer.open { visibility: visible; pointer-events: auto; transform: translateX(0); transition-delay: 0s; }
+    .drawer-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; min-height: 76px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+    .drawer-header p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
+    .drawer-body { height: calc(100vh - 76px); padding: 20px; overflow: auto; }
+    .operation-progress { height: 6px; margin-bottom: 24px; background: #e8ece9; border-radius: 3px; overflow: hidden; }
+    .operation-progress span { display: block; width: 0; height: 100%; background: var(--accent); transition: width .35s ease; }
+    .steps { display: grid; gap: 0; }
+    .op-step { position: relative; display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; min-height: 64px; }
+    .op-step::before { position: absolute; top: 26px; bottom: -4px; left: 12px; width: 1px; background: var(--line-strong); content: ""; }
+    .op-step:last-child::before { display: none; }
+    .step-icon { position: relative; z-index: 1; display: grid; place-items: center; width: 26px; height: 26px; color: var(--subtle); background: #edf0ee; border-radius: 50%; }
+    .op-step.running .step-icon { color: #fff; background: var(--blue); animation: pulse 1.5s infinite; }
+    .op-step.done .step-icon { color: #fff; background: var(--success); }
+    .op-step strong { display: block; margin-top: 4px; font-size: 12px; }
+    .op-step p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+    .op-step time { margin-top: 5px; color: var(--subtle); font-size: 10px; }
+
+    .toast { position: fixed; right: 22px; bottom: 22px; z-index: 120; display: flex; align-items: center; gap: 9px; max-width: min(420px, calc(100vw - 44px)); padding: 11px 14px; color: #164f35; background: #f0faf4; border: 1px solid #b9dfc8; border-radius: 6px; box-shadow: var(--shadow); transform: translateY(18px); opacity: 0; pointer-events: none; transition: .18s ease; }
+    .toast.show { transform: none; opacity: 1; }
+    .toast.warning { color: #6a480d; background: var(--warning-soft); border-color: #efd5a2; }
+
+    @media (max-width: 1100px) {
+      .split-layout { grid-template-columns: 1fr; }
+      .metric-band { grid-template-columns: repeat(2, 1fr); }
+      .metric-item:nth-child(2) { border-right: 0; }
+      .metric-item:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+      .revision-grid { grid-template-columns: 1fr; gap: 10px; }
+      .revision-arrow { height: 28px; transform: rotate(90deg); }
+    }
+    @media (max-width: 760px) {
+      :root { --sidebar-width: 0px; }
+      .sidebar { inset: auto 0 0 0; width: auto; height: 62px; flex-direction: row; border-top: 1px solid #111713; border-right: 0; }
+      .brand, .nav-label, .control-state { display: none; }
+      .nav { grid-template-columns: repeat(4, 1fr); width: 100%; padding: 5px 7px; }
+      .nav-button { flex-direction: column; justify-content: center; gap: 3px; min-width: 0; min-height: 52px; padding: 3px 5px; font-size: 10px; text-align: center; }
+      .nav-button.active { box-shadow: inset 0 3px #66b9ab; }
+      .nav-button .icon { width: 16px; height: 16px; }
+      .nav-badge { display: none; }
+      .main-shell { margin-left: 0; padding-bottom: 62px; }
+      .topbar { height: 58px; padding: 0 14px; }
+      .top-context { min-width: 0; }
+      .top-context span, .global-search, .prototype-chip { display: none; }
+      .avatar { margin-left: auto; }
+      .content { padding: 18px 14px 36px; }
+      .page-header { align-items: stretch; flex-direction: column; }
+      .header-actions { width: 100%; }
+      .header-actions select { flex: 1; min-width: 0; }
+      .workflow-strip { grid-template-columns: repeat(4, minmax(72px,1fr)); overflow-x: auto; }
+      .workflow-step { min-height: 54px; padding: 8px; }
+      .workflow-step span { display: none; }
+      .scope-banner { grid-template-columns: auto minmax(0, 1fr); }
+      .scope-banner .source-tag { grid-column: 2; justify-self: start; }
+      .metric-band { grid-template-columns: 1fr 1fr; }
+      .metric-item { padding: 14px; }
+      .metric-value { font-size: 20px; }
+      .panel-header { flex-direction: column; }
+      .panel-actions { width: 100%; justify-content: space-between; }
+      .chart-wrap { height: 230px; }
+      .plan-summary { grid-template-columns: 1fr; }
+      .plan-meta { align-items: flex-start; flex-direction: column; gap: 5px; }
+      .revision-fact { grid-template-columns: 94px minmax(0,1fr); }
+      .toast { right: 14px; bottom: 76px; max-width: calc(100vw - 28px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="sr-only" aria-hidden="true" width="0" height="0">
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01M11 7h7M11 17h7"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l2.5-7 5 14 2.5-7h4"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.8 19h18.4L12 3Z"/><path d="M12 9v4M12 17h.01"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18 9a7 7 0 0 0-12-2L4 9m2 6a7 7 0 0 0 12 2l2-2"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-git" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><path d="M6 8v8M8 6h8M18 8c0 5-3 6-10 6"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 2h8l4 4v16H6V2Z"/><path d="M14 2v5h5M9 12h6M9 16h6"/></symbol>
+    <symbol id="i-diff" viewBox="0 0 24 24"><circle cx="7" cy="5" r="2"/><circle cx="17" cy="19" r="2"/><path d="M7 7v12M17 5v12M14 8l3-3 3 3"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"/><path d="m7 15 4-5 3 3 5-7"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-5"/></symbol>
+  </svg>
+
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark"><span></span><span></span><span></span></div><div><strong>StackPilot</strong><small>Local Control Plane</small></div></div>
+    <div class="nav-label">控制台</div>
+    <nav class="nav" aria-label="主导航">
+      <button class="nav-button" type="button"><svg class="icon"><use href="#i-grid"/></svg><span>系统总览</span></button>
+      <button class="nav-button active" type="button"><svg class="icon"><use href="#i-server"/></svg><span>系统详情</span></button>
+      <button class="nav-button" type="button" data-toast="静态原型未连接 Operation API"><svg class="icon"><use href="#i-activity"/></svg><span>操作中心</span></button>
+      <button class="nav-button" type="button" data-toast="静态原型未连接 Incident API"><svg class="icon"><use href="#i-alert"/></svg><span>事故中心</span></button>
+    </nav>
+    <div class="control-state"><div><span class="status-dot" style="color:#a2600f"></span><strong>静态原型</strong></div><p>未连接控制面<br>不读取真实业务工作区</p></div>
+  </aside>
+
+  <main class="main-shell">
+    <header class="topbar">
+      <div class="top-context"><strong>能力边界验证</strong><span>基于仓库事实的新修订</span></div>
+      <span class="prototype-chip">VERIFIED SCOPE PROTOTYPE</span>
+      <label class="global-search"><span class="sr-only">全局搜索</span><svg class="icon"><use href="#i-search"/></svg><input type="search" placeholder="静态原型未连接搜索" disabled></label>
+      <div class="avatar" aria-label="本地用户">本机</div>
+    </header>
+
+    <div class="content">
+      <div class="breadcrumb"><button type="button">系统总览</button><svg class="icon" style="width:13px;height:13px"><use href="#i-chevron"/></svg><span id="breadcrumb-system">当前代码基线</span></div>
+      <div class="page-header">
+        <div>
+          <div class="page-title-row"><h1 id="system-name">当前实现基线</h1><span id="system-state" class="status-pill success"><span class="status-dot"></span>事实已核对</span><span id="workspace-state" class="status-pill neutral"><span class="status-dot"></span>Capability 关闭</span></div>
+          <p id="system-subtitle">只展示当前仓库可读取的数据；不代表任何真实业务系统正在运行</p>
+        </div>
+        <div class="header-actions">
+          <label><span class="sr-only">选择能力范围</span><select id="system-select" data-testid="system-select"><option value="baseline">当前代码基线</option><option value="ready">RO Gate 完成态 · 可执行 Fixture</option><option value="blocked">RO Gate 完成态 · 阻断 Fixture</option></select></label>
+          <button class="icon-button" id="refresh-view" type="button" aria-label="刷新当前数据" title="刷新当前数据"><svg class="icon"><use href="#i-refresh"/></svg></button>
+          <button class="button primary" id="header-plan-button" type="button" disabled><svg class="icon"><use href="#i-diff"/></svg>生成变更计划</button>
+        </div>
+      </div>
+
+      <section class="scope-banner" id="scope-banner"><svg class="icon"><use href="#i-shield"/></svg><div><strong id="scope-title">当前代码事实</strong><p id="scope-text">Manifest、ResolvedSpec、运行实例、health result、Incident 和 Secret 元数据已有来源；RevisionCollector、资源采样、ChangePlan 与 Verified Restart 尚未实现。</p></div><span class="source-tag existing" id="scope-tag">仓库已核对</span></section>
+
+      <section class="workflow-strip" aria-label="变更闭环">
+        <div class="workflow-step done" data-workflow="observe"><span class="workflow-index"><svg class="icon" style="width:14px;height:14px"><use href="#i-check"/></svg></span><div><strong>运行观测</strong><span>资源与健康事实</span></div></div>
+        <div class="workflow-step active" data-workflow="compare"><span class="workflow-index">2</span><div><strong>修订对比</strong><span>running / workspace</span></div></div>
+        <div class="workflow-step" data-workflow="plan"><span class="workflow-index">3</span><div><strong>变更计划</strong><span>只读风险判定</span></div></div>
+        <div class="workflow-step" data-workflow="verify"><span class="workflow-index">4</span><div><strong>验证式重启</strong><span>稳定窗口证据</span></div></div>
+      </section>
+
+      <div class="tabs" role="tablist" aria-label="系统详情视图">
+        <button class="tab-button active" type="button" role="tab" aria-selected="true" data-tab="monitor">运行监测</button>
+        <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="revision">修订与环境</button>
+        <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="plan">变更计划 <span id="plan-tab-state"></span></button>
+      </div>
+
+      <section class="tab-panel active" id="panel-monitor" role="tabpanel">
+        <div class="metric-band">
+          <div class="metric-item"><div class="metric-label"><span>健康检查</span><span class="source-tag existing" id="coverage-source">现有数据</span></div><div class="metric-value" id="coverage-value">可读取</div><div class="metric-trend" id="coverage-trend">health_results + hourly aggregates</div></div>
+          <div class="metric-item"><div class="metric-label"><span>受管树 CPU</span><span class="source-tag planned" id="cpu-source">RO-04</span></div><div class="metric-value" id="cpu-value">--</div><div class="metric-trend" id="cpu-trend">需扩展 Supervisor 观测协议</div></div>
+          <div class="metric-item"><div class="metric-label"><span>内存工作集</span><span class="source-tag planned" id="memory-source">RO-04</span></div><div class="metric-value" id="memory-value">--</div><div class="metric-trend" id="memory-trend">当前协议不返回资源统计</div></div>
+          <div class="metric-item"><div class="metric-label"><span>错误聚合</span><span class="source-tag existing" id="error-source">可派生</span></div><div class="metric-value" id="error-value">可实现</div><div class="metric-trend" id="error-trend">health、Incident、log 元数据有来源</div></div>
+        </div>
+
+        <div class="split-layout">
+          <section class="panel">
+            <header class="panel-header"><div><h2>资源趋势</h2><p id="chart-subtitle">Sampler 与资源存储尚未实现</p></div><div class="panel-actions"><label><span class="sr-only">服务筛选</span><select id="service-filter" disabled><option value="all">全部服务</option><option value="service-api">service-api</option><option value="service-web">service-web</option></select></label><div class="segment" aria-label="时间范围"><button class="active" type="button" data-range="1h" disabled>1h</button><button type="button" data-range="6h" disabled>6h</button><button type="button" data-range="24h" disabled>24h</button></div></div></header>
+            <div class="panel-body">
+              <div class="chart-wrap unavailable" id="chart-wrap" aria-label="CPU 和内存资源趋势图">
+                <div class="chart-y"><span>100%</span><span>75%</span><span>50%</span><span>25%</span><span>0%</span></div>
+                <div class="chart-unavailable visible" id="chart-unavailable"><div><strong>FEATURE_NOT_ENABLED</strong><span>资源采样表、Sampler 和 Supervisor/Docker stats 适配器尚未实现。</span></div></div>
+                <svg viewBox="0 0 720 210" preserveAspectRatio="none" role="img" aria-label="资源趋势">
+                  <g class="chart-grid"><line x1="48" y1="10" x2="710" y2="10"/><line x1="48" y1="56" x2="710" y2="56"/><line x1="48" y1="102" x2="710" y2="102"/><line x1="48" y1="148" x2="710" y2="148"/><line x1="48" y1="194" x2="710" y2="194"/></g>
+                  <path class="chart-area" id="chart-area" d="M48 194 L48 143 L110 137 L172 147 L234 126 L296 132 L358 115 L420 121 L482 104 L544 111 L606 98 L668 106 L710 96 L710 194 Z"/>
+                  <path class="chart-line cpu" id="cpu-line" d="M48 143 L110 137 L172 147 L234 126 L296 132 L358 115 L420 121 L482 104 L544 111 L606 98 L668 106 L710 96"/>
+                  <path class="chart-line memory" id="memory-line" d="M48 112 L110 110 L172 108 L234 104 L296 101 L358 98 L420 95 L482 93 L544 90 L606 88 L668 86 L710 84"/>
+                </svg>
+                <div class="chart-axis"><span id="axis-start">15:42</span><span>16:02</span><span>16:22</span><span id="axis-end">16:42</span></div>
+                <div class="chart-legend"><span class="legend-item"><span class="legend-line"></span>CPU 使用率</span><span class="legend-item"><span class="legend-line memory"></span>内存占配额比例</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <header class="panel-header"><div><h2>持续健康</h2><p id="health-source-text">Phase 2E 引擎与存储已存在</p></div><span id="health-status" class="status-pill neutral"><span class="status-dot"></span>未读取真实系统</span></header>
+            <div class="panel-body">
+              <div class="health-summary"><div class="coverage-ring warning" id="coverage-ring"><strong id="coverage-ring-text">--</strong></div><div><strong id="health-summary-title">健康数据模型已经存在</strong><p id="health-summary-text">静态原型未连接控制面，因此不显示真实系统结果。</p></div></div>
+              <div class="compact-list" id="health-list"></div>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <header class="panel-header"><div><h2>服务运行事实</h2><p>资源不可用时明确显示，不使用根 PID 近似完整树</p></div><button class="button small" id="recent-sample" type="button" data-toast="FEATURE_NOT_ENABLED：静态原型没有采样数据" disabled><svg class="icon"><use href="#i-clock"/></svg>最近采样</button></header>
+          <div class="table-wrap"><table><thead><tr><th>服务</th><th>状态</th><th>Liveness</th><th>CPU</th><th>内存</th><th>受管进程</th><th>运行时长</th></tr></thead><tbody id="service-table"></tbody></table></div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="panel-revision" role="tabpanel">
+        <div class="notice info" id="revision-notice"><svg class="icon"><use href="#i-shield"/></svg><div><strong>Running 事实可组装，Workspace Revision 尚未实现</strong><p>现有 ResolvedSpec、运行实例和 Secret 元数据可作为 running 来源；Git/白名单文件/候选 Runner 需要 RO-02 新增只读采集器。</p></div></div>
+        <div class="revision-grid">
+          <section class="revision-column"><header class="revision-title"><div><h2>Running Revision</h2><p>实例启动事实的字段映射</p></div><span id="running-revision-state" class="status-pill neutral"><span class="status-dot"></span>现有来源</span></header><dl class="revision-facts" id="running-facts"></dl></section>
+          <div class="revision-arrow"><svg class="icon" style="width:22px;height:22px"><use href="#i-arrow"/></svg></div>
+          <section class="revision-column"><header class="revision-title"><div><h2>Workspace Revision</h2><p>工作区只读候选快照</p></div><span id="workspace-revision-state" class="status-pill neutral"><span class="status-dot"></span>尚未实现</span></header><dl class="revision-facts" id="workspace-facts"></dl></section>
+        </div>
+        <section class="panel"><header class="panel-header"><div><h2 id="revision-table-title">能力缺口</h2><p id="revision-table-subtitle">尚未形成 Workspace Revision，因此没有真实差异结果</p></div><button class="button primary small" id="revision-plan-button" type="button" disabled><svg class="icon"><use href="#i-diff"/></svg>基于此快照生成计划</button></header><div class="table-wrap"><table><thead><tr><th>范围</th><th>来源</th><th>变化</th><th>初步风险</th><th>说明</th></tr></thead><tbody id="revision-diff-table"></tbody></table></div></section>
+      </section>
+
+      <section class="tab-panel" id="panel-plan" role="tabpanel">
+        <section class="panel" id="plan-empty"><div class="plan-empty"></div></section>
+        <div class="plan-result" id="plan-result">
+          <div id="plan-notice"></div>
+          <div class="plan-summary"><div><h2><span id="plan-state-pill" class="status-pill warning"><span class="status-dot"></span>Fixture</span><span id="plan-title">ChangePlan Fixture</span></h2><p><span class="mono" id="plan-id">fixture-plan</span> · 规则版本 risk/v1 · 生成于 <span id="plan-time">--</span></p></div><div class="plan-meta"><span>0 项变化</span><span>0 项阻断</span><button class="button small" id="simulate-drift" type="button"><svg class="icon"><use href="#i-refresh"/></svg>模拟 Fixture 漂移</button></div></div>
+          <section class="panel"><header class="panel-header"><div><h2>结构化变更项</h2><p>风险由规则注册表确定，不由模型自由判断</p></div><div class="panel-actions"><button class="button" id="regenerate-plan" type="button"><svg class="icon"><use href="#i-refresh"/></svg>重新生成</button><button class="button primary" id="verified-restart" type="button" data-testid="verified-restart"><svg class="icon"><use href="#i-play"/></svg>验证式重启</button></div></header><div class="table-wrap"><table><thead><tr><th>类型</th><th>范围</th><th>变更</th><th>风险</th><th>处理</th></tr></thead><tbody id="plan-change-table"></tbody></table></div></section>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div class="modal-backdrop" id="restart-modal" role="dialog" aria-modal="true" aria-labelledby="restart-modal-title">
+    <div class="modal">
+      <header class="modal-header"><div><h2 id="restart-modal-title">确认验证式重启 Fixture</h2><p>fixture-executable-v1 · 当前运行 fixture 保持不变至停止前校验全部通过</p></div><button class="icon-button" type="button" data-close-modal aria-label="关闭确认窗口"><svg class="icon"><use href="#i-x"/></svg></button></header>
+      <div class="modal-body">
+        <ul class="check-list"><li><span>计划归属与终态</span><span class="status-pill success"><span class="status-dot"></span>有效</span></li><li><span>Workspace revision digest</span><span class="status-pill success"><span class="status-dot"></span>匹配</span></li><li><span>必需服务 liveness 覆盖</span><span class="status-pill success"><span class="status-dot"></span>2 / 2</span></li><li><span>活动 Operation</span><span class="status-pill success"><span class="status-dot"></span>无冲突</span></li></ul>
+        <div class="notice"><svg class="icon"><use href="#i-alert"/></svg><div><strong>目标设计不包含源码或数据自动回滚</strong><p>目标实现应在失败时保留现场并关联 Operation / Incident 证据；此 Fixture 不会切换 Git、恢复数据库或写入任何真实证据。</p></div></div>
+        <div class="confirm-row"><input id="acknowledge" type="checkbox"><label for="acknowledge">我已确认影响范围，并理解失败时需要根据现场证据进行人工处置。</label></div>
+      </div>
+      <footer class="modal-footer"><button class="button" type="button" data-close-modal>取消</button><button class="button primary" id="confirm-restart" type="button" disabled><svg class="icon"><use href="#i-play"/></svg>创建 Operation</button></footer>
+    </div>
+  </div>
+
+  <aside class="operation-drawer" id="operation-drawer" aria-label="验证式重启 Operation" aria-hidden="true">
+    <header class="drawer-header"><div><h2>验证式重启 Fixture</h2><p class="mono">op-fixture-vrestart-01 · UI Preview</p></div><button class="icon-button" id="close-drawer" type="button" aria-label="关闭 Operation 详情"><svg class="icon"><use href="#i-x"/></svg></button></header>
+    <div class="drawer-body"><div id="operation-state" class="notice info"><svg class="icon"><use href="#i-activity"/></svg><div><strong>Operation 流程预览</strong><p>步骤顺序来自已验证的复用路径；此静态原型不执行真实进程操作。</p></div></div><div class="operation-progress"><span id="operation-progress"></span></div><div class="steps" id="operation-steps"></div></div>
+  </aside>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"><svg class="icon"><use href="#i-check"/></svg><span id="toast-message"></span></div>
+
+  <script>
+    const scenarios = {
+      baseline: {
+        fixture: false, enabled: false, blocked: true,
+        shortName: '当前代码基线', name: '当前实现基线', subtitle: '只展示当前仓库可读取的数据；不代表任何真实业务系统正在运行',
+        state: '事实已核对', stateTone: 'success', workspace: 'Capability 关闭', workspaceTone: 'neutral',
+        scopeTitle: '当前代码事实', scopeText: 'Manifest、ResolvedSpec、运行实例、health result、Incident 和 Secret 元数据已有来源；RevisionCollector、资源采样、ChangePlan 与 Verified Restart 尚未实现。', scopeTag: '仓库已核对', scopeTone: 'existing',
+        coverage: '可读取', coveragePercent: '--', coverageTrend: 'health_results + hourly aggregates', cpu: '--', cpuTrend: '需扩展 Supervisor 观测协议', memory: '--', memoryTrend: '当前协议不返回资源统计', errors: '可实现', errorTrend: 'health、Incident、log 元数据有来源',
+        healthTitle: '健康数据模型已经存在', healthText: '静态原型未连接控制面，因此不显示服务数量、成功率或最近结果。', healthStatus: '未读取真实系统', healthTone: 'neutral',
+        health: [
+          { name: '检查结果', type: 'health_results / hourly aggregates', result: '现有', tone: 'success' },
+          { name: 'Liveness 契约', type: 'ResolvedSystemSpec.services[].liveness', result: '现有', tone: 'success' },
+          { name: '真实系统覆盖率', type: '需读取已登记 Manifest 与运行实例', result: '未读取', tone: 'neutral' }
+        ],
+        services: [
+          { name: '运行实例与服务状态', sub: 'system_instances / service_instances', state: '可读取', liveness: 'health_results', cpu: null, memory: null, processes: '--', uptime: 'started_at' },
+          { name: 'Process / Compose 身份', sub: 'Supervisor identity / Compose identity', state: '可核验', liveness: 'readiness / liveness spec', cpu: null, memory: null, processes: '--', uptime: 'runtime state' }
+        ],
+        running: { Digest: 'system_instances.resolved_spec_digest', Manifest: 'system_instances.manifest_digest', Runner: 'ResolvedSystemSpec.services[].process.command', 'DAG / 端口': 'topology / ports', 'Secret 元数据': 'service_instance_secret_versions' },
+        workspaceFacts: { Digest: '未实现：SystemRevisionSnapshot', Git: '未实现：固定 git.exe 只读 probe', Manifest: '可重新读取并严格校验', Runner: '可复用受信 Runner resolver', '白名单文件': '未实现：有界 SHA-256 collector' },
+        diffs: [
+          ['Workspace Revision', 'RO-02', 'RevisionCollector 尚未实现', 'blocked', '没有候选快照时禁止生成计划'],
+          ['ChangePlan', 'RO-05', '领域、存储与 API 尚未实现', 'blocked', 'FEATURE_NOT_ENABLED'],
+          ['Verified Restart', 'RO-06', 'Operation 类型与执行用例尚未实现', 'blocked', '不得复用普通 restart 冒充']
+        ]
+      },
+      ready: {
+        fixture: true, enabled: true, blocked: false,
+        shortName: '可执行 Fixture', name: 'Gate 完成态 Fixture', subtitle: '确定性 revision-diff-v1 数据集；用于验证交互，不代表任何真实业务系统 Gate',
+        state: '实现路径已核对', stateTone: 'success', workspace: 'Fixture 数据', workspaceTone: 'info',
+        scopeTitle: '已验证可实现范围', scopeText: '只包含有明确数据源和实现路径的 Revision、typed diff、确定性风险、stale 校验与组合式 restart 流程。数值和摘要均来自可重复 Fixture。', scopeTag: 'FIXTURE', scopeTone: 'fixture',
+        coverage: '2 / 2', coveragePercent: '100%', coverageTrend: 'Fixture：两个 required daemon 具备 HTTP liveness', cpu: '38.4%', cpuTrend: 'Fixture：Supervisor Job accounting sample', memory: '1.42 GB', memoryTrend: 'Fixture：受管树工作集 sample', errors: '0.4/min', errorTrend: 'Fixture：health / Incident 聚合 sample',
+        healthTitle: 'Fixture 健康覆盖完整', healthText: '可重复测试数据中最近 20 次检查成功；不代表真实系统结果。', healthStatus: 'Fixture 满足前置', healthTone: 'success',
+        health: [
+          { name: 'service-api', type: 'Fixture HTTP liveness', result: '通过', tone: 'success' },
+          { name: 'service-web', type: 'Fixture HTTP liveness', result: '通过', tone: 'success' }
+        ],
+        services: [
+          { name: 'service-api', sub: 'Fixture / Process / Job Object', state: 'Ready', liveness: 'HTTP · fixture', cpu: 27.6, memory: 992, processes: 7, uptime: 'fixture' },
+          { name: 'service-web', sub: 'Fixture / Process / Job Object', state: 'Ready', liveness: 'HTTP · fixture', cpu: 10.8, memory: 462, processes: 4, uptime: 'fixture' }
+        ],
+        running: { Digest: 'fixture:running:7d8a…40c1', Git: 'fixture:clean', Manifest: 'fixture:manifest:v1', Runner: 'fixture:runner:v1', 'Secret 元数据': 'fixture:secret-meta:v1' },
+        workspaceFacts: { Digest: 'fixture:workspace:a8d1…02f4', Git: 'fixture:dirty', Manifest: 'fixture:manifest:v2', Runner: 'fixture:runner:v1', 'Secret 元数据': 'fixture:secret-meta:v1' },
+        diffs: [
+          ['service-api', 'system.yaml', '增加 HTTP liveness', 'low', 'Fixture：结构化 Manifest diff'],
+          ['service-web', 'fixture.lock', '白名单文件 digest 变化', 'medium', 'Fixture：只比较摘要'],
+          ['System', 'system.yaml', 'arguments digest 变化', 'medium', 'Fixture：不展示完整 argv'],
+          ['Workspace', 'Git probe', 'dirty=true', 'high', 'Fixture：不执行 Git 写操作']
+        ]
+      },
+      blocked: {
+        fixture: true, enabled: true, blocked: true,
+        shortName: '阻断 Fixture', name: '健康阻断 Fixture', subtitle: '确定性 health-blocker-v1 数据集；验证 unknown/process-only 不会被判为安全',
+        state: '实现路径已核对', stateTone: 'success', workspace: 'Fixture 数据', workspaceTone: 'info',
+        scopeTitle: '已验证的阻断语义', scopeText: 'required worker 只有 process-alive，无法证明业务处理能力；确定性规则必须生成 blocker，并由服务端禁用 Verified Restart。', scopeTag: 'FIXTURE', scopeTone: 'fixture',
+        coverage: '2 / 3', coveragePercent: '67%', coverageTrend: 'Fixture：一个 required worker 仅 process-alive', cpu: '23.1%', cpuTrend: 'Fixture：Job accounting sample', memory: '2.10 GB', memoryTrend: 'Fixture：受管树工作集 sample', errors: '2.1/min', errorTrend: 'Fixture：health failure sample',
+        healthTitle: 'Fixture 健康覆盖不完整', healthText: 'required worker 没有业务健康端点，不能进入完整验证式重启。', healthStatus: '阻断 Verified Restart', healthTone: 'danger',
+        health: [
+          { name: 'service-api / service-web', type: 'Fixture HTTP liveness', result: '通过', tone: 'success' },
+          { name: 'required-worker', type: 'Fixture process-only', result: '仅进程存活', tone: 'warning' }
+        ],
+        services: [
+          { name: 'service-api', sub: 'Fixture / Process', state: 'Ready', liveness: 'HTTP · fixture', cpu: 8.4, memory: 512, processes: 1, uptime: 'fixture' },
+          { name: 'service-web', sub: 'Fixture / Process', state: 'Ready', liveness: 'HTTP · fixture', cpu: 4.2, memory: 381, processes: 3, uptime: 'fixture' },
+          { name: 'required-worker', sub: 'Fixture / Process', state: 'Degraded', liveness: 'Process only', cpu: 10.5, memory: 1257, processes: 2, uptime: 'fixture' }
+        ],
+        running: { Digest: 'fixture:running:91b2…5cd8', Git: 'fixture:unavailable', Manifest: 'fixture:manifest:v1', Runner: 'fixture:runner:v1', 'Secret 元数据': 'fixture:secret-meta:v1' },
+        workspaceFacts: { Digest: 'fixture:workspace:b32a…71e0', Git: 'fixture:unavailable', Manifest: 'fixture:manifest:v2', Runner: 'fixture:runner:v1', 'Secret 元数据': 'fixture:secret-meta:v1' },
+        diffs: [
+          ['required-worker', 'health contract', '缺少业务 liveness', 'blocked', 'Fixture：阻断完整验证式重启'],
+          ['Workspace', 'Git probe', 'identity unavailable', 'high', 'Fixture：未知不自动归为安全'],
+          ['service-api', 'fixture.lock', '白名单文件 digest 变化', 'medium', 'Fixture：候选工作区有变化']
+        ]
+      }
+    };
+
+    const chartSeries = {
+      '1h': {
+        axis: ['15:42', '16:42'],
+        cpu: 'M48 143 L110 137 L172 147 L234 126 L296 132 L358 115 L420 121 L482 104 L544 111 L606 98 L668 106 L710 96',
+        memory: 'M48 112 L110 110 L172 108 L234 104 L296 101 L358 98 L420 95 L482 93 L544 90 L606 88 L668 86 L710 84'
+      },
+      '6h': {
+        axis: ['10:42', '16:42'],
+        cpu: 'M48 151 L110 142 L172 130 L234 138 L296 110 L358 126 L420 98 L482 118 L544 92 L606 104 L668 89 L710 96',
+        memory: 'M48 123 L110 119 L172 115 L234 112 L296 108 L358 104 L420 101 L482 96 L544 92 L606 89 L668 86 L710 84'
+      },
+      '24h': {
+        axis: ['昨日 16:42', '今日 16:42'],
+        cpu: 'M48 160 L110 151 L172 165 L234 118 L296 135 L358 89 L420 145 L482 108 L544 128 L606 86 L668 114 L710 96',
+        memory: 'M48 146 L110 138 L172 130 L234 122 L296 119 L358 111 L420 105 L482 99 L544 94 L606 90 L668 87 L710 84'
+      }
+    };
+
+    const operationSteps = [
+      ['校验计划', '重新采集候选快照并核对 digest'],
+      ['逆拓扑停止', 'service-web → service-api fixture'],
+      ['Fresh Start', '端口规划、service-api → service-web fixture'],
+      ['Readiness', '等待全部必需服务 Ready'],
+      ['稳定观察', '持续 liveness 观察 30 秒'],
+      ['保存证据', '关联 revision、health、metric 与 event']
+    ];
+
+    const state = { scenario: 'baseline', tab: 'monitor', plan: 'empty', range: '1h', operationTimer: null, toastTimer: null };
+    const byId = id => document.getElementById(id);
+    const icon = name => `<svg class="icon"><use href="#i-${name}"/></svg>`;
+    const escapeHtml = value => String(value).replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
+
+    function pill(tone, text, pulse = false) {
+      return `<span class="status-pill ${tone}"><span class="status-dot${pulse ? ' pulse' : ''}"></span>${escapeHtml(text)}</span>`;
+    }
+
+    function showToast(message, tone = 'success') {
+      const toast = byId('toast');
+      byId('toast-message').textContent = message;
+      toast.className = `toast ${tone} show`;
+      clearTimeout(state.toastTimer);
+      state.toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+    }
+
+    function setTab(tabName) {
+      state.tab = tabName;
+      document.querySelectorAll('[data-tab]').forEach(button => {
+        const active = button.dataset.tab === tabName;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', String(active));
+      });
+      document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.toggle('active', panel.id === `panel-${tabName}`));
+      updateWorkflow();
+    }
+
+    function updateWorkflow() {
+      const order = state.tab === 'monitor' ? 0 : state.tab === 'revision' ? 1 : state.plan === 'empty' ? 2 : state.plan === 'running' ? 2 : 3;
+      document.querySelectorAll('.workflow-step').forEach((step, index) => {
+        step.classList.toggle('done', index < order);
+        step.classList.toggle('active', index === order);
+        const marker = step.querySelector('.workflow-index');
+        marker.innerHTML = index < order ? icon('check') : String(index + 1);
+      });
+    }
+
+    function renderFacts(containerId, facts) {
+      byId(containerId).innerHTML = Object.entries(facts).map(([label, value]) => `<div class="revision-fact"><dt>${escapeHtml(label)}</dt><dd class="${label === 'Digest' ? 'mono' : ''}">${escapeHtml(value)}</dd></div>`).join('');
+    }
+
+    function setSourceTag(id, fixture, baselineText) {
+      const tag = byId(id);
+      tag.className = `source-tag ${fixture ? 'fixture' : id.includes('cpu') || id.includes('memory') ? 'planned' : 'existing'}`;
+      tag.textContent = fixture ? 'FIXTURE' : baselineText;
+    }
+
+    function resourceCell(value, unit, tone) {
+      if (value === null) return '<span class="muted">unavailable</span>';
+      return `<span class="mono">${escapeHtml(value)}${unit}</span><div class="meter ${tone === 'memory' ? 'memory' : ''}"><span style="width:${Math.min(Number(value) / (tone === 'memory' ? 24 : 1), 100)}%"></span></div>`;
+    }
+
+    function renderSystem() {
+      const scenario = scenarios[state.scenario];
+      byId('breadcrumb-system').textContent = scenario.shortName;
+      byId('system-name').textContent = scenario.name;
+      byId('system-subtitle').textContent = scenario.subtitle;
+      byId('system-state').className = `status-pill ${scenario.stateTone}`;
+      byId('system-state').innerHTML = `<span class="status-dot"></span>${scenario.state}`;
+      byId('workspace-state').className = `status-pill ${scenario.workspaceTone}`;
+      byId('workspace-state').innerHTML = `<span class="status-dot"></span>${scenario.workspace}`;
+      byId('scope-banner').className = `scope-banner ${scenario.enabled ? '' : 'warning'}`;
+      byId('scope-title').textContent = scenario.scopeTitle;
+      byId('scope-text').textContent = scenario.scopeText;
+      byId('scope-tag').className = `source-tag ${scenario.scopeTone}`;
+      byId('scope-tag').textContent = scenario.scopeTag;
+      byId('coverage-value').textContent = scenario.coverage;
+      byId('coverage-trend').textContent = scenario.coverageTrend;
+      byId('cpu-value').textContent = scenario.cpu;
+      byId('cpu-trend').textContent = scenario.cpuTrend;
+      byId('memory-value').textContent = scenario.memory;
+      byId('memory-trend').textContent = scenario.memoryTrend;
+      byId('error-value').textContent = scenario.errors;
+      byId('error-trend').textContent = scenario.errorTrend;
+      setSourceTag('coverage-source', scenario.fixture, '现有数据');
+      setSourceTag('cpu-source', scenario.fixture, 'RO-04');
+      setSourceTag('memory-source', scenario.fixture, 'RO-04');
+      setSourceTag('error-source', scenario.fixture, '可派生');
+      byId('chart-unavailable').classList.toggle('visible', !scenario.enabled);
+      byId('chart-wrap').classList.toggle('unavailable', !scenario.enabled);
+      byId('chart-subtitle').textContent = scenario.fixture ? 'Fixture Job accounting · 全部服务' : 'Sampler 与资源存储尚未实现';
+      byId('service-filter').disabled = !scenario.enabled;
+      document.querySelectorAll('[data-range]').forEach(button => { button.disabled = !scenario.enabled; });
+      byId('recent-sample').disabled = !scenario.enabled;
+      byId('recent-sample').dataset.toast = scenario.fixture ? '已按 Fixture 采样顺序显示' : 'FEATURE_NOT_ENABLED：静态原型没有采样数据';
+      byId('coverage-ring-text').textContent = scenario.coveragePercent;
+      byId('coverage-ring').classList.toggle('warning', scenario.blocked);
+      byId('health-summary-title').textContent = scenario.healthTitle;
+      byId('health-summary-text').textContent = scenario.healthText;
+      byId('health-status').className = `status-pill ${scenario.healthTone}`;
+      byId('health-status').innerHTML = `<span class="status-dot"></span>${scenario.healthStatus}`;
+      byId('health-source-text').textContent = scenario.fixture ? '确定性健康 Fixture' : 'Phase 2E 引擎与存储已存在';
+      byId('health-list').innerHTML = scenario.health.map(item => `<div class="compact-row"><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.type)}</span></div>${pill(item.tone, item.result)}</div>`).join('');
+      byId('service-table').innerHTML = scenario.services.map(service => `<tr><td><div class="service-name">${escapeHtml(service.name)}</div><div class="service-sub">${escapeHtml(service.sub)}</div></td><td>${pill(service.state === 'Ready' || service.state === '可读取' || service.state === '可核验' ? 'success' : 'warning', service.state)}</td><td>${escapeHtml(service.liveness)}</td><td>${resourceCell(service.cpu, '%', 'cpu')}</td><td>${resourceCell(service.memory, ' MB', 'memory')}</td><td>${escapeHtml(service.processes)}</td><td>${escapeHtml(service.uptime)}</td></tr>`).join('');
+      renderFacts('running-facts', scenario.running);
+      renderFacts('workspace-facts', scenario.workspaceFacts);
+      byId('running-revision-state').className = `status-pill ${scenario.fixture ? 'info' : 'neutral'}`;
+      byId('running-revision-state').innerHTML = `<span class="status-dot"></span>${scenario.fixture ? 'FIXTURE' : '现有来源'}`;
+      byId('revision-diff-table').innerHTML = scenario.diffs.map(diff => `<tr><td><strong>${escapeHtml(diff[0])}</strong></td><td class="mono">${escapeHtml(diff[1])}</td><td>${escapeHtml(diff[2])}</td><td><span class="risk-badge ${diff[3]}">${diff[3] === 'blocked' ? '阻断' : diff[3] === 'high' ? '高' : diff[3] === 'medium' ? '中' : '低'}</span></td><td class="muted">${escapeHtml(diff[4])}</td></tr>`).join('');
+      byId('revision-table-title').textContent = scenario.fixture ? 'Fixture 候选差异' : '能力缺口';
+      byId('revision-table-subtitle').textContent = scenario.fixture ? '确定性 Fixture 比较结果，按服务和来源分类' : '尚未形成 Workspace Revision，因此没有真实差异结果';
+      byId('workspace-revision-state').className = `status-pill ${scenario.enabled ? scenario.blocked ? 'danger' : 'warning' : 'neutral'}`;
+      byId('workspace-revision-state').innerHTML = `<span class="status-dot"></span>${scenario.enabled ? scenario.blocked ? 'Fixture 有阻断' : 'Fixture 有变化' : '尚未实现'}`;
+      byId('revision-notice').innerHTML = scenario.enabled
+        ? `${icon('shield')}<div><strong>确定性 Revision Fixture</strong><p>字段均对应已核对的数据源和采集边界；摘要值不属于任何真实业务工作区。</p></div>`
+        : `${icon('shield')}<div><strong>Running 事实可组装，Workspace Revision 尚未实现</strong><p>现有 ResolvedSpec、运行实例和 Secret 元数据可作为 running 来源；Git/白名单文件/候选 Runner 需要 RO-02 新增只读采集器。</p></div>`;
+      resetPlan();
+    }
+
+    function renderPlanEmpty() {
+      const scenario = scenarios[state.scenario];
+      const title = scenario.enabled ? '尚未生成 ChangePlan Fixture' : 'ChangePlan capability 尚未发布';
+      const copy = scenario.enabled
+        ? '使用确定性 revision fixture 比较 typed changes 和风险规则；不读取或操作真实工作区。'
+        : '当前领域枚举、SQLite migration、repository 和 API 中没有 ChangePlan。切换到明确标识的 Gate 完成态 Fixture 后才能体验目标交互。';
+      const label = scenario.enabled ? '生成只读 Fixture 计划' : 'FEATURE_NOT_ENABLED';
+      byId('plan-empty').querySelector('.plan-empty').innerHTML = `<div class="empty-icon">${icon('diff')}</div><h2>${title}</h2><p>${copy}</p><button class="button primary" id="create-plan" type="button" data-testid="create-plan" ${scenario.enabled ? '' : 'disabled'}>${icon('play')}${label}</button>`;
+      byId('create-plan').addEventListener('click', createPlan);
+    }
+
+    function resetPlan() {
+      const scenario = scenarios[state.scenario];
+      state.plan = 'empty';
+      byId('plan-empty').style.display = '';
+      byId('plan-result').classList.remove('visible');
+      byId('plan-tab-state').textContent = scenario.enabled ? '· Fixture' : '· 未启用';
+      byId('header-plan-button').disabled = !scenario.enabled;
+      byId('revision-plan-button').disabled = !scenario.enabled;
+      renderPlanEmpty();
+      updateWorkflow();
+    }
+
+    function createPlan() {
+      const scenario = scenarios[state.scenario];
+      if (!scenario.enabled) {
+        setTab('plan');
+        showToast('FEATURE_NOT_ENABLED：ChangePlan 尚未实现', 'warning');
+        return;
+      }
+      if (state.plan === 'running') return;
+      state.plan = 'running';
+      setTab('plan');
+      byId('plan-empty').style.display = '';
+      byId('plan-empty').querySelector('.plan-empty').innerHTML = `<div class="empty-icon">${icon('refresh')}</div><h2>正在生成 ChangePlan Fixture</h2><p>比较两份确定性 revision fixture 并执行固定风险规则；不读取真实工作区。</p>${pill('info', 'Fixture Operation', true)}`;
+      byId('header-plan-button').disabled = true;
+      byId('plan-tab-state').textContent = '· 生成中';
+      updateWorkflow();
+      setTimeout(renderPlan, 1100);
+    }
+
+    function renderPlan() {
+      const scenario = scenarios[state.scenario];
+      state.plan = scenario.blocked ? 'blocked' : 'ready';
+      byId('plan-empty').style.display = 'none';
+      byId('plan-result').classList.add('visible');
+      byId('header-plan-button').disabled = false;
+      byId('plan-tab-state').textContent = scenario.blocked ? '· Fixture 已阻断' : '· Fixture 需确认';
+      byId('plan-state-pill').className = `status-pill ${scenario.blocked ? 'danger' : 'warning'}`;
+      byId('plan-state-pill').innerHTML = `<span class="status-dot"></span>${scenario.blocked ? 'Fixture 已阻断' : 'Fixture 需确认'}`;
+      byId('plan-title').textContent = scenario.blocked ? 'ChangePlan Fixture 存在阻断项' : 'ChangePlan Fixture 已就绪';
+      byId('plan-id').textContent = `fixture-plan-${state.scenario}-01`;
+      byId('plan-time').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+      byId('plan-notice').innerHTML = scenario.blocked
+        ? `<div class="notice danger">${icon('alert')}<div><strong>确定性规则阻断 Verified Restart</strong><p>required worker 只有 process-alive，不能证明业务处理能力；Fixture 验证按钮必须由服务端语义禁用。</p></div></div>`
+        : `<div class="notice">${icon('alert')}<div><strong>Fixture 存在高风险但无阻断项</strong><p>dirty=true 由固定 Git probe 产生。实现不会清理或切换 Git，提交前需要显式确认。</p></div></div>`;
+      const rows = scenario.diffs.map(diff => `<tr><td><span class="change-kind ${diff[3] === 'blocked' ? 'blocked' : diff[2].includes('增加') ? 'added' : 'changed'}">${diff[3] === 'blocked' ? '阻断' : diff[2].includes('增加') ? '新增' : '变更'}</span></td><td><strong>${escapeHtml(diff[0])}</strong><div class="service-sub mono">${escapeHtml(diff[1])}</div></td><td>${escapeHtml(diff[2])}</td><td><span class="risk-badge ${diff[3]}">${diff[3] === 'blocked' ? '阻断' : diff[3] === 'high' ? '高' : diff[3] === 'medium' ? '中' : '低'}</span></td><td class="muted">${escapeHtml(diff[4])}</td></tr>`).join('');
+      byId('plan-change-table').innerHTML = rows;
+      byId('verified-restart').disabled = scenario.blocked;
+      byId('simulate-drift').disabled = scenario.blocked;
+      byId('simulate-drift').style.display = scenario.blocked ? 'none' : '';
+      const meta = byId('plan-result').querySelector('.plan-meta');
+      meta.children[0].textContent = `${scenario.diffs.length} 项 Fixture 变化`;
+      meta.children[1].textContent = `${scenario.diffs.filter(diff => diff[3] === 'blocked').length} 项阻断`;
+      updateWorkflow();
+      showToast(scenario.blocked ? 'Fixture 计划已生成：发现阻断项' : '只读 ChangePlan Fixture 已生成', scenario.blocked ? 'warning' : 'success');
+    }
+
+    function simulateDrift() {
+      if (state.plan !== 'ready') return;
+      state.plan = 'stale';
+      byId('plan-tab-state').textContent = '· 已过期';
+      byId('plan-state-pill').className = 'status-pill danger';
+      byId('plan-state-pill').innerHTML = '<span class="status-dot"></span>已过期';
+      byId('plan-title').textContent = 'Workspace revision 已变化';
+      byId('plan-notice').innerHTML = `<div class="notice danger">${icon('alert')}<div><strong>CHANGE_PLAN_STALE</strong><p>fixture.lock digest 在计划生成后变化。目标实现必须在 stop 前拒绝；此原型未触碰任何真实 PID、容器或端口。</p></div></div>`;
+      byId('verified-restart').disabled = true;
+      byId('simulate-drift').disabled = true;
+      showToast('候选摘要已变化，请重新生成计划', 'warning');
+    }
+
+    function openRestartModal() {
+      if (state.plan !== 'ready') return;
+      byId('restart-modal').classList.add('open');
+      byId('acknowledge').checked = false;
+      byId('confirm-restart').disabled = true;
+      setTimeout(() => byId('acknowledge').focus(), 0);
+    }
+
+    function closeRestartModal() { byId('restart-modal').classList.remove('open'); }
+
+    function renderOperationSteps(activeIndex) {
+      byId('operation-steps').innerHTML = operationSteps.map((step, index) => {
+        const status = index < activeIndex ? 'done' : index === activeIndex ? 'running' : '';
+        const marker = index < activeIndex ? icon('check') : index + 1;
+        return `<div class="op-step ${status}"><span class="step-icon">${marker}</span><div><strong>${escapeHtml(step[0])}</strong><p>${escapeHtml(step[1])}</p></div><time>${index < activeIndex ? '完成' : index === activeIndex ? '执行中' : '等待'}</time></div>`;
+      }).join('');
+      byId('operation-progress').style.width = `${Math.round((activeIndex / operationSteps.length) * 100)}%`;
+    }
+
+    function startVerifiedRestart() {
+      closeRestartModal();
+      byId('operation-drawer').classList.add('open');
+      byId('operation-drawer').setAttribute('aria-hidden', 'false');
+      state.plan = 'executing';
+      let step = 0;
+      renderOperationSteps(step);
+      updateWorkflow();
+      clearInterval(state.operationTimer);
+      state.operationTimer = setInterval(() => {
+        step += 1;
+        if (step < operationSteps.length) {
+          renderOperationSteps(step);
+          return;
+        }
+        clearInterval(state.operationTimer);
+        renderOperationSteps(operationSteps.length);
+        byId('operation-progress').style.width = '100%';
+        byId('operation-state').className = 'notice info';
+        byId('operation-state').innerHTML = `${icon('check')}<div><strong>Fixture 流程到达成功终态</strong><p>UI 状态机已完成全部预期步骤；静态原型没有启动进程，也没有持久化真实证据。</p></div>`;
+        state.plan = 'completed';
+        byId('plan-tab-state').textContent = '· Fixture 已完成';
+        updateWorkflow();
+        showToast('Fixture 流程完成；未执行真实系统操作');
+      }, 650);
+    }
+
+    function updateChart(range) {
+      state.range = range;
+      const series = chartSeries[range];
+      byId('cpu-line').setAttribute('d', series.cpu);
+      byId('memory-line').setAttribute('d', series.memory);
+      byId('chart-area').setAttribute('d', `${series.cpu} L710 194 L48 194 Z`);
+      byId('axis-start').textContent = series.axis[0];
+      byId('axis-end').textContent = series.axis[1];
+      document.querySelectorAll('[data-range]').forEach(button => button.classList.toggle('active', button.dataset.range === range));
+    }
+
+    document.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => setTab(button.dataset.tab)));
+    document.querySelectorAll('[data-range]').forEach(button => button.addEventListener('click', () => updateChart(button.dataset.range)));
+    document.querySelectorAll('[data-toast]').forEach(button => button.addEventListener('click', () => showToast(button.dataset.toast)));
+    document.querySelectorAll('[data-close-modal]').forEach(button => button.addEventListener('click', closeRestartModal));
+    byId('restart-modal').addEventListener('click', event => { if (event.target === byId('restart-modal')) closeRestartModal(); });
+    byId('system-select').addEventListener('change', event => { state.scenario = event.target.value; renderSystem(); setTab('monitor'); showToast(`已切换到 ${scenarios[state.scenario].shortName}`); });
+    byId('service-filter').addEventListener('change', event => { byId('chart-subtitle').textContent = `${scenarios[state.scenario].fixture ? 'Fixture Job accounting' : '资源采样尚未接入'} · ${event.target.options[event.target.selectedIndex].text}`; showToast(scenarios[state.scenario].fixture ? 'Fixture 趋势筛选已更新' : 'FEATURE_NOT_ENABLED：资源趋势尚未实现', scenarios[state.scenario].fixture ? 'success' : 'warning'); });
+    byId('refresh-view').addEventListener('click', () => showToast(scenarios[state.scenario].fixture ? 'Fixture 快照已重置' : '静态原型未连接控制面', scenarios[state.scenario].fixture ? 'success' : 'warning'));
+    byId('header-plan-button').addEventListener('click', createPlan);
+    byId('revision-plan-button').addEventListener('click', createPlan);
+    byId('regenerate-plan').addEventListener('click', () => { resetPlan(); createPlan(); });
+    byId('simulate-drift').addEventListener('click', simulateDrift);
+    byId('verified-restart').addEventListener('click', openRestartModal);
+    byId('acknowledge').addEventListener('change', event => { byId('confirm-restart').disabled = !event.target.checked; });
+    byId('confirm-restart').addEventListener('click', startVerifiedRestart);
+    function closeOperationDrawer() {
+      byId('operation-drawer').classList.remove('open');
+      byId('operation-drawer').setAttribute('aria-hidden', 'true');
+    }
+
+    byId('close-drawer').addEventListener('click', closeOperationDrawer);
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') { closeRestartModal(); closeOperationDrawer(); } });
+
+    renderSystem();
+    updateChart('1h');
+  </script>
+</body>
+</html>

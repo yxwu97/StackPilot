@@ -166,7 +166,7 @@ func (client *Client) Exchange(ctx context.Context, messageType MessageType, pay
 	} else {
 		_ = connection.SetDeadline(time.Now().Add(exchangeTimeout(payload)))
 	}
-	return exchangeMessage(connection, messageType, payload, target)
+	return exchangeMessage(connection, client.identity.ProtocolVersion, messageType, payload, target)
 }
 
 func exchangeTimeout(payload any) time.Duration {
@@ -180,7 +180,7 @@ func exchangeTimeout(payload any) time.Duration {
 	return timeout
 }
 
-func exchangeMessage(connection net.Conn, messageType MessageType, payload, target any) error {
+func exchangeMessage(connection net.Conn, version int, messageType MessageType, payload, target any) error {
 	requestID, err := newRequestID()
 	if err != nil {
 		return err
@@ -189,7 +189,7 @@ func exchangeMessage(connection net.Conn, messageType MessageType, payload, targ
 	if err != nil {
 		return fmt.Errorf("encode Supervisor request payload: %w", err)
 	}
-	request := Request{Version: ProtocolVersion, RequestID: requestID, Type: messageType, Payload: encoded}
+	request := Request{Version: version, RequestID: requestID, Type: messageType, Payload: encoded}
 	if err := WriteRequest(connection, request); err != nil {
 		return err
 	}
@@ -197,7 +197,7 @@ func exchangeMessage(connection net.Conn, messageType MessageType, payload, targ
 	if err != nil {
 		return err
 	}
-	if response.Version != ProtocolVersion || response.RequestID != requestID {
+	if response.Version != version || response.RequestID != requestID {
 		return fmt.Errorf("Supervisor response correlation mismatch")
 	}
 	if !response.OK {

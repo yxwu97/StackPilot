@@ -25,7 +25,7 @@ The local control plane defaults to `http://127.0.0.1:32100`; Vite development u
 
 ## Windows quick start
 
-After building `dist/stackpilot.exe`, run `start-stackpilot.bat`. On first use, the launcher installs and starts the current-user control plane. On every later use, it gracefully stops the installed control-plane PID, upgrades the installation from `dist/stackpilot.exe`, starts a fresh PID, and then opens an authenticated Web console. Managed business processes remain under their independent Supervisors; the launcher does not start BTC, AIWS, PMS, or any business process directly.
+After building `dist/stackpilot.exe`, run `start-stackpilot.bat`. On first use, the launcher terminates any existing `stackpilot.exe` processes, then installs and starts the current-user control plane. On every later use, it gracefully stops the installed control-plane PID, forcefully terminates every remaining `stackpilot.exe` process, confirms that all old processes exited, upgrades the installation from `dist/stackpilot.exe`, starts one fresh control-plane PID, and then opens an authenticated Web console. This repository convenience launcher is an explicit cold start: terminating an `internal-supervisor` also terminates the business process tree protected by that Supervisor's Job Objects. The public `stackpilot service start` and `service upgrade` commands retain their normal takeover behavior.
 
 ## Windows installation
 

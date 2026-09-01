@@ -11,11 +11,14 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 
 	"stackpilot/internal/api"
 	"stackpilot/internal/buildinfo"
+	"stackpilot/internal/capability"
+	"stackpilot/internal/changeplan"
 	"stackpilot/internal/domain"
 	composedriver "stackpilot/internal/driver/compose"
 	processdriver "stackpilot/internal/driver/process"
@@ -25,9 +28,11 @@ import (
 	"stackpilot/internal/incident"
 	"stackpilot/internal/logs"
 	"stackpilot/internal/manifest"
+	"stackpilot/internal/metrics"
 	"stackpilot/internal/orchestrator"
 	"stackpilot/internal/platform"
 	"stackpilot/internal/ports"
+	"stackpilot/internal/revision"
 	"stackpilot/internal/runner"
 	"stackpilot/internal/security"
 	"stackpilot/internal/storage"
@@ -52,6 +57,7 @@ type controlPlane struct {
 	database         *sql.DB
 	singleService    *orchestrator.SingleService
 	workspaceImports *workspace.ImportService
+	metricSampler    *metrics.Sampler
 	handler          http.Handler
 }
 
@@ -88,20 +94,15 @@ func runServer(ctx context.Context, args []string, stdout, stderr io.Writer) (ex
 		return 2
 	}
 	logger := newLogger(stderr)
-	plane, err := newControlPlane(ctx, config, logger)
+	runtimeContext, cancel := context.WithCancel(ctx)
+	plane, err := newControlPlane(runtimeContext, config, logger)
 	if err != nil {
+		cancel()
 		logger.Error("control plane initialization failed", "reason", "startup_error", "error_code", "CONTROL_PLANE_INITIALIZATION_FAILED", "error", err)
 		return 1
 	}
-	defer func() {
-		if err := plane.database.Close(); err != nil {
-			logger.Error("control database close failed", "error", err)
-			exitCode = 1
-		}
-	}()
-	defer plane.singleService.Wait()
-	defer plane.workspaceImports.Wait()
-	if err := plane.singleService.Reconcile(ctx); err != nil {
+	defer shutdownControlPlane(cancel, plane, logger, &exitCode)
+	if err := plane.singleService.Reconcile(runtimeContext); err != nil {
 		logger.Error("startup reconciliation failed", "reason", "startup_error", "error_code", "STARTUP_RECONCILIATION_FAILED", "error", err)
 		return 1
 	}
@@ -109,7 +110,26 @@ func runServer(ctx context.Context, args []string, stdout, stderr io.Writer) (ex
 		logger.Error("periodic reconciliation initialization failed", "reason", "startup_error", "error_code", "PERIODIC_RECONCILIATION_START_FAILED", "error", err)
 		return 1
 	}
-	return serveControlPlane(ctx, config.port, plane.handler, stdout, logger)
+	if plane.metricSampler != nil {
+		if err := plane.metricSampler.Start(runtimeContext); err != nil {
+			logger.Error("metric sampler initialization failed", "reason", "startup_error", "error_code", "METRIC_SAMPLER_START_FAILED", "error", err)
+			return 1
+		}
+	}
+	return serveControlPlane(runtimeContext, config.port, plane.handler, stdout, logger)
+}
+
+func shutdownControlPlane(cancel context.CancelFunc, plane *controlPlane, logger *slog.Logger, exitCode *int) {
+	cancel()
+	if plane.metricSampler != nil {
+		plane.metricSampler.Wait()
+	}
+	plane.workspaceImports.Wait()
+	plane.singleService.Wait()
+	if err := plane.database.Close(); err != nil {
+		logger.Error("control database close failed", "error", err)
+		*exitCode = 1
+	}
 }
 
 func newControlPlane(ctx context.Context, config serverConfig, logger *slog.Logger) (*controlPlane, error) {
@@ -144,9 +164,25 @@ func assembleControlPlane(ctx context.Context, database *sql.DB, dataDir string,
 	if err != nil {
 		return nil, err
 	}
-	service, err := newSingleService(ctx, database, workspaces, secrets, streams.eventBroker, streams.logManager, dataDir, logger)
+	service, dependencies, err := newSingleService(ctx, database, workspaces, secrets, streams.eventBroker, streams.logManager, dataDir, logger)
 	if err != nil {
 		return nil, fmt.Errorf("initialize single-service orchestration: %w", err)
+	}
+	var metricSampler *metrics.Sampler
+	var metricQueries *metrics.QueryService
+	if capability.PublishedName(capability.Phase3ResourceMonitoring) {
+		metricRepository, repositoryErr := storage.NewMetricRepository(database)
+		if repositoryErr != nil {
+			return nil, fmt.Errorf("initialize resource metric repository: %w", repositoryErr)
+		}
+		metricSampler, err = newMetricSampler(metricRepository, dependencies, logger)
+		if err != nil {
+			return nil, fmt.Errorf("initialize resource sampler: %w", err)
+		}
+		metricQueries, err = metrics.NewQueryService(dependencies.runtime, metricRepository)
+		if err != nil {
+			return nil, fmt.Errorf("initialize resource metric queries: %w", err)
+		}
 	}
 	analyzer, err := importer.NewAnalyzer()
 	if err != nil {
@@ -165,11 +201,11 @@ func assembleControlPlane(ctx context.Context, database *sql.DB, dataDir string,
 	if err != nil {
 		return nil, fmt.Errorf("initialize workspace import service: %w", err)
 	}
-	handler, err := newAPIHandler(logger, workspaces, workspaceImports, auth, secrets, streams, service)
+	handler, err := newAPIHandler(logger, workspaces, workspaceImports, auth, secrets, streams, service, metricQueries)
 	if err != nil {
 		return nil, fmt.Errorf("initialize web console: %w", err)
 	}
-	return &controlPlane{database: database, singleService: service, workspaceImports: workspaceImports, handler: handler}, nil
+	return &controlPlane{database: database, singleService: service, workspaceImports: workspaceImports, metricSampler: metricSampler, handler: handler}, nil
 }
 
 func canEditWorkspace(ctx context.Context, service *orchestrator.SingleService, id domain.WorkspaceID) error {
@@ -222,12 +258,13 @@ func newStreamRuntime(database *sql.DB, dataDir string, logger *slog.Logger) (*s
 	return &streamRuntime{audit: audit, events: eventRepository, eventBroker: eventBroker, logManager: logManager, logScopes: logScopes, logBroker: logBroker, incidents: incidentRepository}, nil
 }
 
-func newAPIHandler(logger *slog.Logger, workspaces *workspace.Manager, workspaceImports *workspace.ImportService, auth *security.AuthManager, secrets security.SecretProvider, streams *streamRuntime, service *orchestrator.SingleService) (http.Handler, error) {
+func newAPIHandler(logger *slog.Logger, workspaces *workspace.Manager, workspaceImports *workspace.ImportService, auth *security.AuthManager, secrets security.SecretProvider, streams *streamRuntime, service *orchestrator.SingleService, metricQueries *metrics.QueryService) (http.Handler, error) {
 	return api.NewHandler(api.Config{
-		BuildInfo: buildinfo.Current(), Capabilities: []string{"phase2.auto-restart", "phase2.compose", "phase2.compose-build", "phase2.incidents", "phase2.liveness", "phase2.oneshot", "phase2.python-venv", "phase2.secret", "workspace.runner.go", "workspace.runner.node"}, Logger: logger, Readiness: func(context.Context) bool { return true },
+		BuildInfo: buildinfo.Current(), Capabilities: capability.Published(), Logger: logger, Readiness: func(context.Context) bool { return true },
 		Workspaces: workspaces, WorkspaceImports: workspaceImports, EventStore: streams.events, EventBroker: streams.eventBroker,
 		LogManager: streams.logManager, LogScopes: streams.logScopes, LogBroker: streams.logBroker,
 		SingleService: service, Auth: auth, Audit: streams.audit, Secrets: secrets, Incidents: streams.incidents,
+		MetricQueries: metricQueries,
 	})
 }
 
@@ -273,20 +310,24 @@ func newAuthManager(ctx context.Context, database *sql.DB, dataDir string) (*sec
 	return manager, nil
 }
 
-func newSingleService(ctx context.Context, database *sql.DB, workspaces *workspace.Manager, secrets security.SecretProvider, eventBroker *events.Broker, logManager *logs.Manager, dataDir string, logger *slog.Logger) (*orchestrator.SingleService, error) {
+func newSingleService(ctx context.Context, database *sql.DB, workspaces *workspace.Manager, secrets security.SecretProvider, eventBroker *events.Broker, logManager *logs.Manager, dataDir string, logger *slog.Logger) (*orchestrator.SingleService, *orchestrationDependencies, error) {
 	dependencies, err := newOrchestrationDependencies(database, eventBroker, dataDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	revisions, changePlans, err := newChangePlanDependencies(database, workspaces, dependencies)
+	if err != nil {
+		return nil, nil, err
 	}
 	canonicalDataDir, err := filepath.EvalSymlinks(dataDir)
 	if err != nil {
-		return nil, fmt.Errorf("canonicalize runtime data directory: %w", err)
+		return nil, nil, fmt.Errorf("canonicalize runtime data directory: %w", err)
 	}
 	logCheckpoints, err := storage.NewLogSegmentRepository(database)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return orchestrator.NewSingleService(orchestrator.SingleServiceConfig{
+	service, err := orchestrator.NewSingleService(orchestrator.SingleServiceConfig{
 		Context: ctx, Operations: dependencies.operations, Workspaces: workspaces, Runner: dependencies.runner,
 		Driver: dependencies.driver, Compose: dependencies.compose, Overrides: dependencies.overrides,
 		Runtime: dependencies.runtime, Readiness: dependencies.readiness, Liveness: dependencies.readiness,
@@ -295,9 +336,12 @@ func newSingleService(ctx context.Context, database *sql.DB, workspaces *workspa
 		Secrets: secrets, SecretVersions: dependencies.secretVersions,
 		RestartAttempts:  dependencies.restartAttempts,
 		HealthRetention:  dependencies.healthResults,
+		HealthResults:    dependencies.healthResults,
 		Incidents:        dependencies.incidents,
 		IncidentAnalyzer: dependencies.incidents,
 		IncidentLogs:     logManager,
+		Revisions:        revisions,
+		ChangePlans:      changePlans,
 		LogCheckpoints:   logCheckpoints,
 		StartLogs: func(captureContext context.Context, request logs.CaptureRequest) (orchestrator.CaptureSession, error) {
 			return logManager.Start(captureContext, request)
@@ -305,6 +349,53 @@ func newSingleService(ctx context.Context, database *sql.DB, workspaces *workspa
 		ResumeLogs: func(captureContext context.Context, request logs.CaptureRequest) (orchestrator.CaptureSession, error) {
 			return logManager.Resume(captureContext, request)
 		},
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return service, dependencies, nil
+}
+
+func newChangePlanDependencies(database *sql.DB, workspaces *workspace.Manager, dependencies *orchestrationDependencies) (*revision.Service, *changeplan.Service, error) {
+	gitProbe, err := revision.NewGitProbe("")
+	if err != nil {
+		return nil, nil, err
+	}
+	collector, err := revision.NewCollector(revision.CollectorConfig{
+		Workspaces: workspaces, Runtime: dependencies.runtime, ResolvedSpecs: dependencies.resolvedSpecs,
+		SecretVersions: dependencies.secretVersions, Runners: dependencies.runner, Git: gitProbe,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	revisionRepository, err := storage.NewRevisionRepository(database)
+	if err != nil {
+		return nil, nil, err
+	}
+	revisions, err := revision.NewService(collector, revisionRepository)
+	if err != nil {
+		return nil, nil, err
+	}
+	planRepository, err := storage.NewChangePlanRepository(database)
+	if err != nil {
+		return nil, nil, err
+	}
+	plans, err := changeplan.NewService(planRepository, revisions)
+	return revisions, plans, err
+}
+
+func newMetricSampler(repository *storage.MetricRepository, dependencies *orchestrationDependencies, logger *slog.Logger) (*metrics.Sampler, error) {
+	processSource, err := metrics.NewProcessSource(dependencies.driver, runtime.NumCPU())
+	if err != nil {
+		return nil, err
+	}
+	composeSource, err := metrics.NewComposeSource(dependencies.compose)
+	if err != nil {
+		return nil, err
+	}
+	return metrics.NewSampler(metrics.SamplerConfig{
+		Runtime: dependencies.runtime, Store: repository, Retention: repository,
+		Process: processSource, Compose: composeSource, Logger: logger,
 	})
 }
 
@@ -404,7 +495,7 @@ func newWorkspaceManager(database *sql.DB) (*workspace.Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	return workspace.NewManager(repository, loader, manifest.NewValidatorWithCapabilities("compose", "compose-build", "liveness", "auto-restart", "go"))
+	return workspace.NewManager(repository, loader, manifest.NewValidatorWithCapabilities(capability.PublishedManifestAliases()...))
 }
 
 func newLogger(output io.Writer) *slog.Logger {

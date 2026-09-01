@@ -715,6 +715,152 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+  /api/v1/workspaces/{workspaceId}/metrics:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+    get:
+      operationId: getWorkspaceMetrics
+      summary: Read a bounded resource metric window for managed services
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: granularity
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [detail, hour]
+        - name: serviceId
+          in: query
+          schema:
+            type: array
+            maxItems: 100
+            items:
+              $ref: "#/components/schemas/ManifestId"
+      responses:
+        "200":
+          description: At most 2,000 points over no more than 31 days.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricSeriesList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/FeatureNotEnabled"
+  /api/v1/workspaces/{workspaceId}/revisions:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+    get:
+      operationId: listWorkspaceRevisions
+      summary: List safe immutable revision summaries for a workspace
+      responses:
+        "200":
+          description: Newest revision summaries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionList"
+        "422":
+          $ref: "#/components/responses/FeatureNotEnabled"
+  /api/v1/revisions/{revisionId}:
+    parameters:
+      - name: revisionId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/RevisionId"
+    get:
+      operationId: getSystemRevision
+      summary: Read one safe immutable revision summary
+      responses:
+        "200":
+          description: Revision summary without paths, commands, environment, or source contents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionSummary"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/FeatureNotEnabled"
+  /api/v1/workspaces/{workspaceId}/change-plans:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+    post:
+      operationId: createChangePlan
+      summary: Start a read-only running-to-workspace comparison
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Read-only planning Operation accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationRef"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/FeatureNotEnabled"
+  /api/v1/change-plans/{changePlanId}:
+    parameters:
+      - name: changePlanId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/ChangePlanId"
+    get:
+      operationId: getChangePlan
+      summary: Read one immutable deterministic change plan
+      responses:
+        "200":
+          description: Safe structured change plan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangePlan"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/FeatureNotEnabled"
+  /api/v1/workspaces/{workspaceId}/verified-restart:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+    post:
+      operationId: createVerifiedRestart
+      summary: Restart against an unchanged non-blocked plan and verify stability
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifiedRestartRequest"
+      responses:
+        "202":
+          description: Verified restart Operation accepted after pre-side-effect validation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationRef"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/FeatureNotEnabled"
   /api/v1/operations/{operationId}:
     parameters:
       - name: operationId
@@ -1082,6 +1228,10 @@ components:
         - COMPOSE_STOP_FAILED
         - CONTAINER_UNHEALTHY
         - COMPOSE_VERSION_UNSUPPORTED
+        - CHANGE_PLAN_BLOCKED
+        - CHANGE_PLAN_INVALID_STATE
+        - CHANGE_PLAN_NOT_FOUND
+        - CHANGE_PLAN_STALE
         - DOCKER_DAEMON_UNAVAILABLE
         - DOCKER_NOT_FOUND
         - DOCKER_VERSION_UNSUPPORTED
@@ -1092,6 +1242,9 @@ components:
         - HTTP_TIMEOUT
         - INTERNAL_ERROR
         - LOG_CURSOR_EXPIRED
+        - METRIC_QUERY_INVALID
+        - METRIC_SOURCE_UNAVAILABLE
+        - METRIC_SOURCE_UNSUPPORTED
         - IDEMPOTENCY_KEY_REUSED
         - MANIFEST_DUPLICATE_KEY
         - MANIFEST_CYCLE_DETECTED
@@ -1126,6 +1279,11 @@ components:
         - RUNNER_PATH_UNSAFE
         - RUNNER_VERSION_CHECK_FAILED
         - RUNNER_VERSION_CHECK_TIMEOUT
+        - REVISION_NOT_FOUND
+        - REVISION_GIT_PROBE_FAILED
+        - REVISION_SOURCE_UNAVAILABLE
+        - REVISION_SOURCE_UNSAFE
+        - REVISION_SOURCE_TOO_LARGE
         - SECRET_INVALID
         - SECRET_NOT_FOUND
         - SECRET_VERSION_CONFLICT
@@ -1133,6 +1291,9 @@ components:
         - TCP_TIMEOUT
         - SUPERVISOR_EXITED
         - SUPERVISOR_UNAVAILABLE
+        - VERIFICATION_HEALTH_INCOMPLETE
+        - VERIFICATION_FAILED
+        - VERIFICATION_UNAVAILABLE
         - WORKSPACE_ALREADY_REGISTERED
         - WORKSPACE_ID_REQUIRED
         - WORKSPACE_MANIFEST_UNAVAILABLE
@@ -1358,7 +1519,7 @@ components:
           $ref: "#/components/schemas/ManifestId"
         type:
           type: string
-          enum: [start, stop, restart, service-restart, port-plan, refresh, analyze]
+          enum: [start, stop, restart, service-restart, port-plan, refresh, analyze, change-plan, verified-restart]
         state:
           type: string
           enum: [queued, running, cancelling, succeeded, failed, cancelled]
@@ -1386,6 +1547,177 @@ components:
           maxItems: 128
           items:
             $ref: "#/components/schemas/OperationStep"
+    RevisionId:
+      type: string
+      pattern: "^rev_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    ChangePlanId:
+      type: string
+      pattern: "^plan_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    MetricPoint:
+      type: object
+      additionalProperties: false
+      required: [observedAt, status]
+      properties:
+        observedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [available, unavailable, unsupported]
+        cpuPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+        memoryBytes:
+          type: integer
+          minimum: 0
+        processCount:
+          type: integer
+          minimum: 0
+        containerCount:
+          type: integer
+          minimum: 0
+        reasonCode:
+          type: string
+          maxLength: 128
+    MetricSeries:
+      type: object
+      additionalProperties: false
+      required: [serviceId, source, points]
+      properties:
+        serviceId:
+          $ref: "#/components/schemas/ManifestId"
+        source:
+          type: string
+          enum: [process-job, compose]
+        points:
+          type: array
+          maxItems: 2000
+          items:
+            $ref: "#/components/schemas/MetricPoint"
+    MetricSeriesList:
+      type: object
+      additionalProperties: false
+      required: [from, to, granularity, series]
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        granularity:
+          type: string
+          enum: [detail, hour]
+        series:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/MetricSeries"
+    RevisionSummary:
+      type: object
+      additionalProperties: false
+      required: [id, workspaceId, systemId, kind, schemaVersion, digest, createdAt]
+      properties:
+        id:
+          $ref: "#/components/schemas/RevisionId"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        systemId:
+          $ref: "#/components/schemas/ManifestId"
+        systemInstanceId:
+          type: string
+          pattern: "^si_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        kind:
+          type: string
+          enum: [running, workspace]
+        schemaVersion:
+          type: string
+          maxLength: 32
+        digest:
+          $ref: "#/components/schemas/Digest"
+        createdAt:
+          type: string
+          format: date-time
+    RevisionList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/RevisionSummary"
+    ChangePlanItem:
+      type: object
+      additionalProperties: false
+      required: [kind, change, risk, key, summary]
+      properties:
+        kind:
+          type: string
+          enum: [manifest, service, dependency, runner, port, health, restart, dependency-file, compose, secret]
+        change:
+          type: string
+          enum: [added, removed, changed]
+        risk:
+          type: string
+          enum: [info, low, medium, high, blocked]
+        key:
+          type: string
+          maxLength: 256
+        summary:
+          type: string
+          maxLength: 1024
+    ChangePlan:
+      type: object
+      additionalProperties: false
+      required: [id, workspaceId, systemId, createdByOperationId, fromRevision, toRevision, ruleVersion, state, risk, itemCount, blockedCount, items, createdAt]
+      properties:
+        id:
+          $ref: "#/components/schemas/ChangePlanId"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        systemId:
+          $ref: "#/components/schemas/ManifestId"
+        createdByOperationId:
+          $ref: "#/components/schemas/OperationId"
+        fromRevision:
+          $ref: "#/components/schemas/RevisionSummary"
+        toRevision:
+          $ref: "#/components/schemas/RevisionSummary"
+        ruleVersion:
+          type: string
+          maxLength: 32
+        state:
+          type: string
+          enum: [ready, blocked]
+        risk:
+          type: string
+          enum: [info, low, medium, high, blocked]
+        itemCount:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        blockedCount:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        items:
+          type: array
+          maxItems: 10000
+          items:
+            $ref: "#/components/schemas/ChangePlanItem"
+        createdAt:
+          type: string
+          format: date-time
+    VerifiedRestartRequest:
+      type: object
+      additionalProperties: false
+      required: [changePlanId]
+      properties:
+        changePlanId:
+          $ref: "#/components/schemas/ChangePlanId"
     ServiceRuntimeStatus:
       type: object
       additionalProperties: false
@@ -1469,7 +1801,7 @@ components:
     SystemRuntimeStatus:
       type: object
       additionalProperties: false
-      required: [systemId, workspaceId, state, services, ports]
+      required: [systemId, workspaceId, state, services, ports, healthCoverage]
       properties:
         systemId:
           $ref: "#/components/schemas/ManifestId"
@@ -1501,6 +1833,38 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PortRuntimeStatus"
+        healthCoverage:
+          type: array
+          maxItems: 256
+          items:
+            $ref: "#/components/schemas/HealthCoverageSummary"
+    HealthCoverageSummary:
+      type: object
+      additionalProperties: false
+      required: [serviceInstanceId, coverage, satisfiesVerification]
+      properties:
+        serviceInstanceId:
+          type: string
+          pattern: "^svi_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        readinessKind:
+          type: string
+          enum: [process, tcp, http, compose]
+        livenessKind:
+          type: string
+          enum: [process, tcp, http, compose]
+        coverage:
+          type: string
+          enum: [business, container, process-only, unavailable]
+        satisfiesVerification:
+          type: boolean
+        latestSuccess:
+          type: boolean
+        latestErrorCode:
+          type: string
+          maxLength: 128
+        latestCheckedAt:
+          type: string
+          format: date-time
     DomainEvent:
       type: object
       additionalProperties: false
@@ -1609,9 +1973,15 @@ components:
           type: string
         serviceId:
           $ref: "#/components/schemas/ManifestId"
+        operationId:
+          $ref: "#/components/schemas/OperationId"
+        changePlanId:
+          $ref: "#/components/schemas/ChangePlanId"
+        revisionId:
+          $ref: "#/components/schemas/RevisionId"
         kind:
           type: string
-          enum: [port-conflict, process-exit, readiness-timeout, liveness-failure, restart-limit, identity-mismatch, known-log-error]
+          enum: [port-conflict, process-exit, readiness-timeout, liveness-failure, restart-limit, identity-mismatch, known-log-error, verification-failure]
         triggerCode:
           type: string
         windowStart:
@@ -2479,6 +2849,12 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
+    FeatureNotEnabled:
+      description: The route contract exists, but its capability has not passed the release Gate.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
     UnprocessableManifest:
       description: The manifest is structurally valid input but cannot be registered safely.
       content:
@@ -2486,6 +2862,66 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
 x-stackpilot-error-codes:
+  CHANGE_PLAN_BLOCKED:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  CHANGE_PLAN_INVALID_STATE:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  CHANGE_PLAN_NOT_FOUND:
+    httpStatus: 404
+    retryable: false
+    allowedDetails: []
+  CHANGE_PLAN_STALE:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  METRIC_QUERY_INVALID:
+    httpStatus: 400
+    retryable: false
+    allowedDetails: []
+  METRIC_SOURCE_UNAVAILABLE:
+    httpStatus: 503
+    retryable: true
+    allowedDetails: []
+  METRIC_SOURCE_UNSUPPORTED:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  REVISION_GIT_PROBE_FAILED:
+    httpStatus: 503
+    retryable: true
+    allowedDetails: []
+  REVISION_NOT_FOUND:
+    httpStatus: 404
+    retryable: false
+    allowedDetails: []
+  REVISION_SOURCE_UNAVAILABLE:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  REVISION_SOURCE_UNSAFE:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  REVISION_SOURCE_TOO_LARGE:
+    httpStatus: 413
+    retryable: false
+    allowedDetails: []
+  VERIFICATION_FAILED:
+    httpStatus: 409
+    retryable: false
+    allowedDetails: []
+  VERIFICATION_HEALTH_INCOMPLETE:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
+  VERIFICATION_UNAVAILABLE:
+    httpStatus: 422
+    retryable: false
+    allowedDetails: []
   AUTH_BOOTSTRAP_INVALID:
     httpStatus: 401
     retryable: false

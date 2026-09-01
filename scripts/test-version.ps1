@@ -41,5 +41,5 @@ finally {
     Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Assert-Equal (Get-StackPilotProductVersion $repositoryRoot) '0.1.0' 'repository version'
+Assert-Equal (Get-StackPilotProductVersion $repositoryRoot) '0.1.1' 'repository version'
 Write-Host 'Version tests passed.'

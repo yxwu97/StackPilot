@@ -2,9 +2,10 @@
 import { ArrowLeft, Box, Delete, Document, FolderAdd, Monitor, Refresh, RefreshRight, Search, Setting, SwitchButton, TopRight, VideoPlay, Warning } from '@element-plus/icons-vue'
 import { ElAlert, ElButton, ElDialog, ElDrawer, ElEmpty, ElIcon, ElInput, ElSkeleton, ElTabPane, ElTable, ElTableColumn, ElTabs, ElTag, ElTimeline, ElTimelineItem, ElTooltip } from 'element-plus'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { getVersion } from './api/client'
+import { APIError, getSystemStatus, getVersion } from './api/client'
 import type { Incident, Operation, ServiceRuntimeStatus, SystemSummary, Workspace } from './api/types'
 import ServiceLogViewer from './components/logs/ServiceLogViewer.vue'
+import ObservabilityChangePanel from './components/observability/ObservabilityChangePanel.vue'
 import WorkspaceImportDialog from './components/workspaces/WorkspaceImportDialog.vue'
 import WorkspaceDetailDrawer from './components/workspaces/WorkspaceDetailDrawer.vue'
 import { useCatalogStore } from './stores/catalog'
@@ -29,6 +30,7 @@ const authenticationTitle = computed(() => {
 })
 const controlPlaneAddress = window.location.host
 const systemVersion = ref<string | null>(null)
+const systemCapabilities = ref<string[]>([])
 const versionLoaded = ref(false)
 const systemVersionText = computed(() => systemVersion.value === null ? '--' : `v${systemVersion.value}`)
 const systemVersionTitle = computed(() => versionLoaded.value && systemVersion.value === null
@@ -47,6 +49,9 @@ const serviceDrawerOpen = ref(false)
 const operationDrawerOpen = ref(false)
 const incidentDrawerOpen = ref(false)
 const selectedService = ref<ServiceRuntimeStatus | null>(null)
+const overviewMutation = ref<{ systemId: string; action: 'start' | 'stop' | 'restart' } | null>(null)
+const openingWebSystemId = ref<string | null>(null)
+const overviewActionError = ref<{ message: string; traceId: string | null } | null>(null)
 let serviceDrawerTrigger: HTMLElement | null = null
 const currentManifestInvalid = computed(() => catalog.selected?.system.manifestStatus === 'invalid')
 const staleRuntimeSnapshot = computed(() => {
@@ -98,9 +103,12 @@ watch(() => session.state, (value) => {
 
 async function loadSystemVersion(): Promise<void> {
   try {
-    systemVersion.value = (await getVersion()).version
+    const version = await getVersion()
+    systemVersion.value = version.version
+    systemCapabilities.value = version.capabilities
   } catch {
     systemVersion.value = null
+    systemCapabilities.value = []
   } finally {
     versionLoaded.value = true
   }
@@ -179,6 +187,79 @@ async function runSystemAction(action: 'start' | 'stop' | 'restart'): Promise<vo
   if (system === undefined) return
   await runtime.mutate(system.id, system.workspaceId, action)
   await catalog.load()
+}
+
+async function runOverviewSystemAction(value: unknown, action: 'start' | 'stop' | 'restart'): Promise<void> {
+  const system = resolveSystemSummary(value)
+  if (system === null) return
+  if (systemActionBlockReason(system, action) !== null) return
+  overviewActionError.value = null
+  overviewMutation.value = { systemId: system.id, action }
+  try {
+    await runtime.mutate(system.id, system.workspaceId, action)
+    await catalog.load()
+  } finally {
+    overviewMutation.value = null
+  }
+}
+
+async function openSystemWeb(value: unknown): Promise<void> {
+  const system = resolveSystemSummary(value)
+  if (system === null) return
+  if (webActionBlockReason(system) !== null) return
+  overviewActionError.value = null
+  const target = window.open('about:blank', '_blank')
+  if (target === null) {
+    overviewActionError.value = { message: '浏览器阻止了新窗口，请允许本站打开新窗口后重试。', traceId: null }
+    return
+  }
+  target.opener = null
+  openingWebSystemId.value = system.id
+  try {
+    const status = await getSystemStatus(system.id, system.workspaceId)
+    const port = status.ports.find((item) => item.logicalName === 'web')?.port
+    if (port === undefined) throw new Error('当前运行实例没有可用的 Web 端口。')
+    target.location.replace(`http://127.0.0.1:${port}`)
+  } catch (reason: unknown) {
+    target.close()
+    overviewActionError.value = reason instanceof APIError
+      ? { message: `${reason.code}: ${reason.message}`, traceId: reason.traceId }
+      : { message: reason instanceof Error ? reason.message : '打开 Web 失败。', traceId: null }
+  } finally {
+    openingWebSystemId.value = null
+  }
+}
+
+function systemActionBlockReason(value: unknown, action: 'start' | 'stop' | 'restart'): string | null {
+  const system = resolveSystemSummary(value)
+  if (system === null) return '系统状态不可用，请重新加载'
+  if (runtime.mutating) return '另一项系统操作正在执行'
+  if (system.activeOperationId !== null) return '系统存在活动 Operation'
+  if (action !== 'stop' && system.manifestStatus === 'invalid') return '系统清单无效'
+  if (action === 'start' && system.state !== 'stopped') return '仅已停止的系统可以启动'
+  if (action !== 'start' && system.state === 'stopped') return `已停止的系统不能${action === 'stop' ? '停止' : '重启'}`
+  return null
+}
+
+function webActionBlockReason(value: unknown): string | null {
+  const system = resolveSystemSummary(value)
+  if (system === null) return '系统状态不可用，请重新加载'
+  if (openingWebSystemId.value !== null) return '正在解析 Web 地址'
+  if (system.activeOperationId !== null) return '系统存在活动 Operation'
+  if (!['running', 'degraded'].includes(system.state)) return '系统运行后才能打开 Web'
+  return null
+}
+
+function overviewActionLoading(value: unknown, action: 'start' | 'stop' | 'restart'): boolean {
+  const system = resolveSystemSummary(value)
+  if (system === null) return false
+  return overviewMutation.value?.systemId === system.id && overviewMutation.value.action === action
+}
+
+function resolveSystemSummary(value: unknown): SystemSummary | null {
+  if (typeof value !== 'object' || value === null || !('id' in value) || !('workspaceId' in value)) return null
+  if (typeof value.id !== 'string' || typeof value.workspaceId !== 'string') return null
+  return catalog.systems.find((item) => item.id === value.id && item.workspaceId === value.workspaceId) ?? null
 }
 
 async function refreshManifest(workspaceId: string): Promise<void> {
@@ -370,6 +451,9 @@ function severityTag(value: string): 'danger' | 'warning' | 'info' {
 
         <template v-if="view === 'systems'">
           <section class="page-header"><div><h1>系统总览</h1><p>已注册的本地系统定义与清单状态</p></div><ElButton type="primary" :icon="FolderAdd" @click="addDialogOpen = true">注册工作区</ElButton></section>
+          <ElAlert v-if="overviewActionError !== null" class="persistent-error" :title="overviewActionError.message" type="error" :closable="false" show-icon>
+            <template v-if="overviewActionError.traceId !== null" #default><span class="mono">{{ overviewActionError.traceId }}</span></template>
+          </ElAlert>
           <section class="metrics-band" aria-label="系统统计">
             <div><span>系统</span><strong>{{ catalog.systems.length }}</strong></div>
             <div><span>服务定义</span><strong>{{ catalog.systems.reduce((sum, item) => sum + item.serviceSummary.total, 0) }}</strong></div>
@@ -387,6 +471,16 @@ function severityTag(value: string): 'danger' | 'warning' | 'info' {
               <ElTableColumn label="服务" width="100"><template #default="scope">{{ scope.row.serviceSummary.ready }} / {{ scope.row.serviceSummary.total }}</template></ElTableColumn>
               <ElTableColumn label="工作区" min-width="280"><template #default="scope"><span class="path-text" :title="scope.row.workspacePath">{{ scope.row.workspacePath }}</span></template></ElTableColumn>
               <ElTableColumn label="更新时间" width="170"><template #default="scope">{{ formatTime(scope.row.updatedAt) }}</template></ElTableColumn>
+              <ElTableColumn label="操作" width="160" align="right" fixed="right">
+                <template #default="scope">
+                  <div class="table-actions">
+                    <ElTooltip :content="systemActionBlockReason(scope.row, 'start') ?? '启动'" placement="top"><span><ElButton :icon="VideoPlay" circle size="small" type="primary" plain :loading="overviewActionLoading(scope.row, 'start')" :disabled="systemActionBlockReason(scope.row, 'start') !== null" :aria-label="`启动 ${scope.row.name}`" @click.stop="runOverviewSystemAction(scope.row, 'start')" /></span></ElTooltip>
+                    <ElTooltip :content="systemActionBlockReason(scope.row, 'stop') ?? '停止'" placement="top"><span><ElButton :icon="SwitchButton" circle size="small" plain :loading="overviewActionLoading(scope.row, 'stop')" :disabled="systemActionBlockReason(scope.row, 'stop') !== null" :aria-label="`停止 ${scope.row.name}`" @click.stop="runOverviewSystemAction(scope.row, 'stop')" /></span></ElTooltip>
+                    <ElTooltip :content="systemActionBlockReason(scope.row, 'restart') ?? '重启'" placement="top"><span><ElButton :icon="RefreshRight" circle size="small" plain :loading="overviewActionLoading(scope.row, 'restart')" :disabled="systemActionBlockReason(scope.row, 'restart') !== null" :aria-label="`重启 ${scope.row.name}`" @click.stop="runOverviewSystemAction(scope.row, 'restart')" /></span></ElTooltip>
+                    <ElTooltip :content="webActionBlockReason(scope.row) ?? '打开 Web'" placement="top"><span><ElButton :icon="TopRight" circle size="small" plain :loading="openingWebSystemId === scope.row.id" :disabled="webActionBlockReason(scope.row) !== null" :aria-label="`打开 ${scope.row.name} Web`" @click.stop="openSystemWeb(scope.row)" /></span></ElTooltip>
+                  </div>
+                </template>
+              </ElTableColumn>
             </ElTable>
           </section>
         </template>
@@ -462,6 +556,17 @@ function severityTag(value: string): 'danger' | 'warning' | 'info' {
                   <ElTableColumn label="替换" min-width="140"><template #default="scope">{{ scope.row.replaced ? `${scope.row.conflictPort} → ${scope.row.port}` : '未替换' }}</template></ElTableColumn>
                 </ElTable>
               </section>
+            </ElTabPane>
+            <ElTabPane label="监测 / 变更" name="observability">
+              <ObservabilityChangePanel
+                :workspace-id="catalog.selected.system.workspaceId"
+                :services="catalog.selected.services"
+                :status="runtime.status"
+                :active-operation="runtime.activeOperation !== null"
+                :capabilities="systemCapabilities"
+                :active="detailTab === 'observability'"
+                @refresh="refreshSnapshots"
+              />
             </ElTabPane>
             <ElTabPane label="操作" name="operations">
               <section class="surface">

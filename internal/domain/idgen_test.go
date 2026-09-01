@@ -51,6 +51,25 @@ func TestNewRuntimeIDsGenerateCanonicalULIDs(t *testing.T) {
 	}
 }
 
+func TestNewPlanningIDsGenerateCanonicalULIDs(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
+	revision, err := NewRevisionID(now, bytes.NewReader(bytes.Repeat([]byte{0x33}, 10)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := NewChangePlanID(now, bytes.NewReader(bytes.Repeat([]byte{0x44}, 10)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseRevisionID(revision.String()); err != nil || len(revision.String()) != 30 {
+		t.Fatalf("generated revision ID = %q: %v", revision, err)
+	}
+	if _, err := ParseChangePlanID(plan.String()); err != nil || len(plan.String()) != 31 {
+		t.Fatalf("generated change-plan ID = %q: %v", plan, err)
+	}
+}
+
 func TestNewWorkspaceIDRejectsInvalidInputs(t *testing.T) {
 	if _, err := NewWorkspaceID(time.Now(), nil); err == nil {
 		t.Fatal("NewWorkspaceID(nil entropy) unexpectedly succeeded")

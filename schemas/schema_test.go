@@ -9,6 +9,8 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
 	"gopkg.in/yaml.v3"
+
+	"stackpilot/internal/capability"
 )
 
 const schemaURL = "https://stackpilot.dev/schemas/system-v1alpha1.schema.json"
@@ -105,6 +107,50 @@ func TestSchemaAcceptsComposeBuildAndReadinessPolicy(t *testing.T) {
 	if err := schema.Validate(decodeYAML(t, []byte(manifestWith(value)))); err != nil {
 		t.Fatalf("validate Compose build policy: %v", err)
 	}
+}
+
+func TestSchemaCapabilityAnnotationsUseRegisteredNames(t *testing.T) {
+	t.Parallel()
+	contents, err := os.ReadFile("system-v1alpha1.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document any
+	if err := json.Unmarshal(contents, &document); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range schemaCapabilityNames(document) {
+		if !capability.Known(name) {
+			t.Errorf("schema capability %q is not in the Go registry", name)
+		}
+	}
+}
+
+func schemaCapabilityNames(value any) []string {
+	var result []string
+	switch typed := value.(type) {
+	case []any:
+		for _, child := range typed {
+			result = append(result, schemaCapabilityNames(child)...)
+		}
+	case map[string]any:
+		for key, child := range typed {
+			if key == "x-stackpilot-capability" {
+				switch annotation := child.(type) {
+				case string:
+					result = append(result, annotation)
+				case map[string]any:
+					for _, name := range annotation {
+						if text, ok := name.(string); ok {
+							result = append(result, text)
+						}
+					}
+				}
+			}
+			result = append(result, schemaCapabilityNames(child)...)
+		}
+	}
+	return result
 }
 
 func compileSchema(t *testing.T) *jsonschema.Schema {

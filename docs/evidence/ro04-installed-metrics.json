@@ -1,0 +1,180 @@
+{
+    "schemaVersion":  "ro04-installed-metrics/v1",
+    "generatedAt":  "2026-08-31T11:13:16.5879321+00:00",
+    "platform":  "windows/amd64",
+    "candidateVersion":  "0.3.0-ro04.20260831",
+    "candidateSha256":  "066ac3776e8d067629567d45ce4448d9674c28611c246ed275ed6e95d2074ff6",
+    "capability":  "phase3.resource-monitoring",
+    "gateStatus":  "passed",
+    "activeSystems":  5,
+    "readyServices":  18,
+    "minimumPoints":  2,
+    "queryLatencyP95Ms":  968.196,
+    "blockers":  [
+
+                 ],
+    "services":  [
+                     {
+                         "systemId":  "agenthub",
+                         "serviceId":  "analysis-runner",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  4,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.5929901Z"
+                     },
+                     {
+                         "systemId":  "agenthub",
+                         "serviceId":  "api",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  4,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.5935145Z"
+                     },
+                     {
+                         "systemId":  "agenthub",
+                         "serviceId":  "infrastructure",
+                         "driver":  "compose",
+                         "runtimeState":  "ready",
+                         "pointCount":  4,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:45.3724039Z"
+                     },
+                     {
+                         "systemId":  "agenthub",
+                         "serviceId":  "report-worker",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  4,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.5945735Z"
+                     },
+                     {
+                         "systemId":  "agenthub",
+                         "serviceId":  "web",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  4,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.5956214Z"
+                     },
+                     {
+                         "systemId":  "agenthub",
+                         "serviceId":  "worker",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  4,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.5961469Z"
+                     },
+                     {
+                         "systemId":  "aiws",
+                         "serviceId":  "agent-runtime",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  9,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.586701Z"
+                     },
+                     {
+                         "systemId":  "aiws",
+                         "serviceId":  "infrastructure",
+                         "driver":  "compose",
+                         "runtimeState":  "ready",
+                         "pointCount":  10,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:45.3734469Z"
+                     },
+                     {
+                         "systemId":  "aiws",
+                         "serviceId":  "server",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  9,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.5888852Z"
+                     },
+                     {
+                         "systemId":  "aiws",
+                         "serviceId":  "web",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  9,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.5888852Z"
+                     },
+                     {
+                         "systemId":  "btc",
+                         "serviceId":  "backend",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  12,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.586701Z"
+                     },
+                     {
+                         "systemId":  "btc",
+                         "serviceId":  "web",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  12,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.586701Z"
+                     },
+                     {
+                         "systemId":  "gnmarket",
+                         "serviceId":  "frontend",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  6,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.5911386Z"
+                     },
+                     {
+                         "systemId":  "gnmarket",
+                         "serviceId":  "job",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  5,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.5916601Z"
+                     },
+                     {
+                         "systemId":  "gnmarket",
+                         "serviceId":  "web",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  6,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.5924426Z"
+                     },
+                     {
+                         "systemId":  "pms",
+                         "serviceId":  "backend",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  7,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.5894145Z"
+                     },
+                     {
+                         "systemId":  "pms",
+                         "serviceId":  "rag",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  8,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.5899372Z"
+                     },
+                     {
+                         "systemId":  "pms",
+                         "serviceId":  "web",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "pointCount":  6,
+                         "latestStatus":  "available",
+                         "latestObservedAt":  "2026-08-31T11:12:42.6005795Z"
+                     }
+                 ]
+}

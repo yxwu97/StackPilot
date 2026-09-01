@@ -34,6 +34,11 @@ func NewRuntimeInstanceRepository(database *sql.DB, notifier events.Notifier) (*
 	return &RuntimeInstanceRepository{database: database, notifier: notifier}, nil
 }
 
+// IsRuntimeStateConflict reports whether err identifies an optimistic runtime transition conflict.
+func (*RuntimeInstanceRepository) IsRuntimeStateConflict(err error) bool {
+	return errors.Is(err, ErrRuntimeStateConflict)
+}
+
 // Create atomically inserts one system/service pair and their creation events.
 func (repository *RuntimeInstanceRepository) Create(ctx context.Context, operationID domain.OperationID, system domain.SystemInstance, service domain.ServiceInstance) error {
 	return repository.CreateSystem(ctx, operationID, system, []domain.ServiceInstance{service})

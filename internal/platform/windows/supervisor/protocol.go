@@ -18,7 +18,11 @@ import (
 
 const (
 	// ProtocolVersion is the current private Supervisor wire version.
-	ProtocolVersion = 1
+	ProtocolVersion = 2
+	// MinimumProtocolVersion is the oldest lifecycle-compatible Supervisor version.
+	MinimumProtocolVersion = 1
+	// ResourceProtocolVersion introduced Job Object resource observations.
+	ResourceProtocolVersion = 2
 	// MaxMessageSize bounds every framed request and response.
 	MaxMessageSize = 1 << 20
 	maxEnvironment = 512
@@ -32,6 +36,7 @@ const (
 	MessageHello           MessageType = "hello"
 	MessageStartService    MessageType = "start-service"
 	MessageInspectService  MessageType = "inspect-service"
+	MessageObserveService  MessageType = "observe-service"
 	MessageStopService     MessageType = "stop-service"
 	MessageShutdownIfEmpty MessageType = "shutdown-if-empty"
 )
@@ -129,9 +134,19 @@ type ServiceStatus struct {
 	Forced    bool             `json:"forced,omitempty"`
 }
 
+// ResourceObservation is one safe full-Job resource counter snapshot.
+type ResourceObservation struct {
+	ServiceID       string           `json:"serviceId"`
+	ObservedAt      time.Time        `json:"observedAt"`
+	CPUTotalMillis  int64            `json:"cpuTotalMillis"`
+	MemoryBytes     uint64           `json:"memoryBytes"`
+	ActiveProcesses uint32           `json:"activeProcesses"`
+	Identity        *ProcessIdentity `json:"identity"`
+}
+
 // DecodePayload strictly decodes the request payload for its registered type.
 func (request Request) DecodePayload() (any, error) {
-	if request.Version != ProtocolVersion {
+	if request.Version < MinimumProtocolVersion || request.Version > ProtocolVersion {
 		return nil, fmt.Errorf("%w: got %d", errVersionMismatch, request.Version)
 	}
 	if !requestIDPattern.MatchString(request.RequestID) {
@@ -144,6 +159,11 @@ func (request Request) DecodePayload() (any, error) {
 	case MessageStartService:
 		target = &StartServiceRequest{}
 	case MessageInspectService:
+		target = &ServiceRequest{}
+	case MessageObserveService:
+		if request.Version < ResourceProtocolVersion {
+			return nil, fmt.Errorf("%w: resource observation requires version %d", errVersionMismatch, ResourceProtocolVersion)
+		}
 		target = &ServiceRequest{}
 	case MessageStopService:
 		target = &StopServiceRequest{}
@@ -169,20 +189,28 @@ var (
 
 // ErrorResponse maps a decoding/validation failure to a safe response.
 func ErrorResponse(requestID string, err error) Response {
+	return errorResponseForVersion(ProtocolVersion, requestID, err)
+}
+
+func errorResponseForVersion(version int, requestID string, err error) Response {
 	code, message := ErrorInvalidMessage, "The Supervisor request is invalid."
 	if errors.Is(err, errVersionMismatch) {
 		code, message = ErrorVersionMismatch, "The Supervisor protocol version is incompatible."
 	}
-	return Response{Version: ProtocolVersion, RequestID: requestID, Error: &ProtocolError{Code: code, Message: message}}
+	return Response{Version: version, RequestID: requestID, Error: &ProtocolError{Code: code, Message: message}}
 }
 
 // SuccessResponse encodes a typed payload in a successful envelope.
 func SuccessResponse(requestID string, value any) (Response, error) {
+	return successResponseForVersion(ProtocolVersion, requestID, value)
+}
+
+func successResponseForVersion(version int, requestID string, value any) (Response, error) {
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return Response{}, fmt.Errorf("encode Supervisor response payload: %w", err)
 	}
-	return Response{Version: ProtocolVersion, RequestID: requestID, OK: true, Payload: payload}, nil
+	return Response{Version: version, RequestID: requestID, OK: true, Payload: payload}, nil
 }
 
 // ReadRequest reads one bounded frame and strictly decodes its envelope.

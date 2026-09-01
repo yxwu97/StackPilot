@@ -175,6 +175,33 @@ func (driver *Driver) Inspect(ctx context.Context, identity base.RuntimeIdentity
 	}, nil
 }
 
+// ObserveResources verifies the persisted identity and returns full Job Object counters.
+func (driver *Driver) ObserveResources(ctx context.Context, identity base.RuntimeIdentity) (base.ResourceObservation, error) {
+	client, token, err := driver.clientForIdentity(ctx, identity)
+	if err != nil {
+		return base.ResourceObservation{}, err
+	}
+	if token.Supervisor.ProtocolVersion < supervisor.ResourceProtocolVersion {
+		return base.ResourceObservation{}, ErrResourceUnsupported
+	}
+	var observed supervisor.ResourceObservation
+	if err := client.Exchange(ctx, supervisor.MessageObserveService,
+		supervisor.ServiceRequest{ServiceID: token.ServiceID}, &observed); err != nil {
+		return base.ResourceObservation{}, mapSupervisorError(err)
+	}
+	status := supervisor.ServiceStatus{ServiceID: observed.ServiceID, Identity: observed.Identity}
+	if observed.ServiceID != token.ServiceID || verifyStatusIdentity(identity, status) != nil {
+		return base.ResourceObservation{}, ErrIdentityMismatch
+	}
+	if observed.ObservedAt.IsZero() || observed.ObservedAt.Location() != time.UTC || observed.CPUTotalMillis < 0 {
+		return base.ResourceObservation{}, ErrSupervisorUnavailable
+	}
+	return base.ResourceObservation{
+		ObservedAt: observed.ObservedAt, CPUTotalMillis: observed.CPUTotalMillis,
+		MemoryBytes: observed.MemoryBytes, ActiveProcesses: observed.ActiveProcesses,
+	}, nil
+}
+
 func inspectStatus(ctx context.Context, client supervisorClient, serviceID string) (supervisor.ServiceStatus, error) {
 	var status supervisor.ServiceStatus
 	if err := client.Exchange(ctx, supervisor.MessageInspectService,

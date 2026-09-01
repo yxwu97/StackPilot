@@ -159,7 +159,9 @@ func TestOperationRecoveryFailsInterruptedWorkAndReleasesLock(t *testing.T) {
 	}
 	assertRecoveredOperation(t, manager, queued.Operation.ID, false)
 
-	running, err := manager.Create(context.Background(), operationInput("recover-running", []byte(`{"request":2}`)))
+	runningInput := operationInput("recover-running", []byte(`{"request":2}`))
+	runningInput.Type = domain.OperationVerifiedRestart
+	running, err := manager.Create(context.Background(), runningInput)
 	if err != nil {
 		t.Fatalf("create running Operation: %v", err)
 	}
@@ -174,6 +176,10 @@ func TestOperationRecoveryFailsInterruptedWorkAndReleasesLock(t *testing.T) {
 		t.Fatalf("RecoverInterrupted(running) = (%v, %v)", ids, err)
 	}
 	assertRecoveredOperation(t, manager, running.Operation.ID, true)
+	recovered, err := manager.Get(context.Background(), running.Operation.ID)
+	if err != nil || recovered.Type != domain.OperationVerifiedRestart {
+		t.Fatalf("recovered verified restart type = (%v, %v)", recovered.Type, err)
+	}
 	if ids, err := manager.RecoverInterrupted(context.Background()); err != nil || len(ids) != 0 {
 		t.Fatalf("repeated RecoverInterrupted() = (%v, %v)", ids, err)
 	}

@@ -4,20 +4,22 @@ package domain
 type OperationType string
 
 const (
-	OperationStart          OperationType = "start"
-	OperationStop           OperationType = "stop"
-	OperationRestart        OperationType = "restart"
-	OperationServiceRestart OperationType = "service-restart"
-	OperationPortPlan       OperationType = "port-plan"
-	OperationRefresh        OperationType = "refresh"
-	OperationAnalyze        OperationType = "analyze"
+	OperationStart           OperationType = "start"
+	OperationStop            OperationType = "stop"
+	OperationRestart         OperationType = "restart"
+	OperationServiceRestart  OperationType = "service-restart"
+	OperationPortPlan        OperationType = "port-plan"
+	OperationRefresh         OperationType = "refresh"
+	OperationAnalyze         OperationType = "analyze"
+	OperationChangePlan      OperationType = "change-plan"
+	OperationVerifiedRestart OperationType = "verified-restart"
 )
 
 // Valid reports whether the operation type is part of the versioned domain contract.
 func (value OperationType) Valid() bool {
 	switch value {
 	case OperationStart, OperationStop, OperationRestart, OperationServiceRestart,
-		OperationPortPlan, OperationRefresh, OperationAnalyze:
+		OperationPortPlan, OperationRefresh, OperationAnalyze, OperationChangePlan, OperationVerifiedRestart:
 		return true
 	default:
 		return false
@@ -169,8 +171,10 @@ func (value ServiceState) CanTransitionTo(target ServiceState) bool {
 		return target == ServiceStopped
 	case ServiceStopping:
 		return target == ServiceStopped || target == ServiceFailed || target == ServiceUnknown
-	case ServiceFailed, ServiceUnknown:
+	case ServiceFailed:
 		return target == ServiceStopping || target == ServiceStopped
+	case ServiceUnknown:
+		return target == ServiceStopping || target == ServiceStopped || target == ServiceFailed
 	default:
 		return false
 	}

@@ -102,6 +102,9 @@ func Upgrade(ctx context.Context, installDir, sourceExecutable, version string) 
 		return Status{}, err
 	}
 	if strings.EqualFold(checksum, record.SHA256) {
+		if err := scheduler.Register(ctx, record); err != nil {
+			return Status{}, err
+		}
 		return inspectRecord(ctx, record)
 	}
 	wasRunning := isRunning(ctx, record)

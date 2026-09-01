@@ -38,6 +38,11 @@ func (*Driver) Inspect(context.Context, base.RuntimeIdentity) (base.RuntimeObser
 	return base.RuntimeObservation{}, unsupported()
 }
 
+// ObserveResources reports the explicit non-Windows capability gate.
+func (*Driver) ObserveResources(context.Context, base.RuntimeIdentity) (base.ResourceObservation, error) {
+	return base.ResourceObservation{}, ErrResourceUnsupported
+}
+
 // Recover rejects non-Windows execution until Phase 3.
 func (*Driver) Recover(context.Context, base.RuntimeIdentity) (base.RecoveredRuntime, error) {
 	return base.RecoveredRuntime{}, unsupported()

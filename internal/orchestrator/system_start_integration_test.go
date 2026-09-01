@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"stackpilot/internal/changeplan"
 	"stackpilot/internal/domain"
 	"stackpilot/internal/driver"
 	"stackpilot/internal/events"
@@ -22,6 +23,8 @@ import (
 	"stackpilot/internal/manifest"
 	"stackpilot/internal/orchestrator"
 	"stackpilot/internal/ports"
+	"stackpilot/internal/revision"
+	"stackpilot/internal/runner"
 	"stackpilot/internal/storage"
 	"stackpilot/internal/workspace"
 )
@@ -46,6 +49,25 @@ func TestSystemStartUsesDependencyOrderAndPersistsPlan(t *testing.T) {
 	status, err := harness.service.Status(context.Background(), harness.workspace.ID)
 	if err != nil || status.System == nil || status.System.State != domain.SystemRunning || len(status.Services) != 2 {
 		t.Fatalf("running system status = %#v, %v", status, err)
+	}
+	for _, runtime := range status.Services {
+		if err := harness.healthResults.Record(context.Background(), runtime.ID, health.Result{
+			Purpose: health.PurposeLiveness, Kind: health.KindTCP, Success: true,
+			CheckedAt: time.Now().UTC(), Duration: time.Millisecond, Summary: "reachable",
+		}); err != nil {
+			t.Fatalf("record liveness for %s: %v", runtime.ServiceID, err)
+		}
+	}
+	status, err = harness.service.Status(context.Background(), harness.workspace.ID)
+	if err != nil {
+		t.Fatalf("Status() with liveness evidence error = %v", err)
+	}
+	for _, runtime := range status.Services {
+		coverage := status.HealthCoverage[runtime.ID]
+		if coverage.Coverage != domain.HealthCoverageBusiness || coverage.Latest == nil ||
+			coverage.Latest.Purpose != health.PurposeLiveness || !coverage.SatisfiesVerification {
+			t.Fatalf("health coverage for %s = %#v", runtime.ServiceID, coverage)
+		}
 	}
 	var bound, specs int
 	if err := harness.database.QueryRow(`SELECT COUNT(*) FROM port_leases WHERE state='bound'`).Scan(&bound); err != nil || bound != 2 {
@@ -411,11 +433,13 @@ func TestServiceRestartRejectsChangedManifest(t *testing.T) {
 }
 
 type systemServiceHarness struct {
-	service   *orchestrator.SingleService
-	workspace workspace.Record
-	driver    *fakeDriver
-	database  *sql.DB
-	manager   *workspace.Manager
+	service       *orchestrator.SingleService
+	workspace     workspace.Record
+	driver        *fakeDriver
+	database      *sql.DB
+	manager       *workspace.Manager
+	healthResults *storage.HealthResultRepository
+	liveness      *recordingLiveness
 }
 
 func newSystemServiceHarness(t *testing.T, readiness interface {
@@ -437,6 +461,22 @@ func newCompletedDependencyHarness(t *testing.T) systemServiceHarness {
 func newSystemServiceHarnessWithWriter(t *testing.T, readiness interface {
 	Await(context.Context, health.Request) (health.Outcome, error)
 }, writeManifest func(string)) systemServiceHarness {
+	return newSystemServiceHarnessWithRunner(t, readiness, writeManifest, fakeRunner{})
+}
+
+type harnessRunner interface {
+	Resolve(context.Context, runner.ResolveRequest) (*runner.ResolvedCommand, error)
+}
+
+func newSystemServiceHarnessWithRunner(t *testing.T, readiness interface {
+	Await(context.Context, health.Request) (health.Outcome, error)
+}, writeManifest func(string), runnerValue harnessRunner) systemServiceHarness {
+	return newSystemServiceHarnessWithContext(t, context.Background(), readiness, writeManifest, runnerValue)
+}
+
+func newSystemServiceHarnessWithContext(t *testing.T, serviceContext context.Context, readiness interface {
+	Await(context.Context, health.Request) (health.Outcome, error)
+}, writeManifest func(string), runnerValue harnessRunner) systemServiceHarness {
 	t.Helper()
 	root := t.TempDir()
 	writeManifest(root)
@@ -447,7 +487,7 @@ func newSystemServiceHarnessWithWriter(t *testing.T, readiness interface {
 	t.Cleanup(func() { _ = database.Close() })
 	workspaceRepository, _ := storage.NewWorkspaceRepository(database)
 	loader, _ := manifest.NewLoader()
-	workspaceManager, _ := workspace.NewManager(workspaceRepository, loader, manifest.NewValidatorWithCapabilities("auto-restart"))
+	workspaceManager, _ := workspace.NewManager(workspaceRepository, loader, manifest.NewValidatorWithCapabilities("auto-restart", "liveness"))
 	record, err := workspaceManager.Register(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
@@ -459,15 +499,40 @@ func newSystemServiceHarnessWithWriter(t *testing.T, readiness interface {
 	leaseRepository, _ := storage.NewPortLeaseRepository(database)
 	planner, _ := ports.NewPlanner(ports.Config{Store: leaseRepository})
 	resolvedSpecs, _ := storage.NewResolvedSpecRepository(database)
+	secretVersions, _ := storage.NewServiceSecretVersionRepository(database)
 	restartAttempts, _ := storage.NewRestartAttemptRepository(database)
+	healthResults, _ := storage.NewHealthResultRepository(database)
 	incidentRepository, _ := storage.NewIncidentRepository(database)
 	incidents, _ := incident.NewCoordinator(incidentRepository, nil)
+	revisionRepository, _ := storage.NewRevisionRepository(database)
+	collector, err := revision.NewCollector(revision.CollectorConfig{
+		Workspaces: workspaceManager, Runtime: runtimeRepository, ResolvedSpecs: resolvedSpecs,
+		SecretVersions: secretVersions, Runners: runnerValue,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisions, err := revision.NewService(collector, revisionRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changePlanRepository, _ := storage.NewChangePlanRepository(database)
+	changePlans, err := changeplan.NewService(changePlanRepository, revisionRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
 	driverValue := &fakeDriver{inspectEntered: make(chan struct{}, 1), observation: driver.RuntimeObservation{State: "running"}}
+	liveness := &recordingLiveness{results: healthResults, success: true, record: true}
+	ownedContext, cancelService := context.WithCancel(serviceContext)
 	service, err := orchestrator.NewSingleService(orchestrator.SingleServiceConfig{
-		Context: context.Background(), Operations: operationManager, Workspaces: workspaceManager,
-		Runner: fakeRunner{}, Driver: driverValue, Runtime: runtimeRepository, Readiness: readiness,
-		DataDir: t.TempDir(), PortPlanner: planner, PortLeases: leaseRepository, ResolvedSpecs: resolvedSpecs,
-		RestartAttempts: restartAttempts, Incidents: incidents,
+		Context: ownedContext, Operations: operationManager, Workspaces: workspaceManager,
+		Runner: runnerValue, Driver: driverValue, Runtime: runtimeRepository, Readiness: readiness,
+		Liveness: liveness,
+		DataDir:  t.TempDir(), PortPlanner: planner, PortLeases: leaseRepository, ResolvedSpecs: resolvedSpecs,
+		RestartAttempts: restartAttempts, HealthResults: healthResults, Incidents: incidents,
+		SecretVersions: secretVersions, Revisions: revisions, ChangePlans: changePlans,
+		VerificationStableWindow: 20 * time.Millisecond, VerificationTimeout: 2 * time.Second,
+		VerificationPollInterval: 5 * time.Millisecond,
 		StartLogs: func(context.Context, logs.CaptureRequest) (orchestrator.CaptureSession, error) {
 			return fakeCapture{}, nil
 		},
@@ -475,8 +540,48 @@ func newSystemServiceHarnessWithWriter(t *testing.T, readiness interface {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(service.Wait)
-	return systemServiceHarness{service: service, workspace: *record, driver: driverValue, database: database, manager: workspaceManager}
+	t.Cleanup(func() {
+		cancelService()
+		service.Wait()
+	})
+	return systemServiceHarness{
+		service: service, workspace: *record, driver: driverValue, database: database,
+		manager: workspaceManager, healthResults: healthResults, liveness: liveness,
+	}
+}
+
+type recordingLiveness struct {
+	results *storage.HealthResultRepository
+	mutex   sync.Mutex
+	success bool
+	record  bool
+}
+
+func (monitor *recordingLiveness) MonitorLiveness(ctx context.Context, request health.LivenessRequest, _ health.LivenessHandler) error {
+	monitor.mutex.Lock()
+	record, success := monitor.record, monitor.success
+	monitor.mutex.Unlock()
+	if record {
+		result := health.Result{
+			Purpose: health.PurposeLiveness, Kind: request.Spec.Kind, CheckedAt: time.Now().UTC(),
+			Duration: time.Millisecond, Success: success,
+		}
+		if !success {
+			result.ErrorCode = health.CodeHTTPStatusMismatch
+			result.Summary = "fixture liveness failure"
+		}
+		if err := monitor.results.Record(ctx, request.ServiceInstanceID, result); err != nil {
+			return err
+		}
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (monitor *recordingLiveness) configure(record, success bool) {
+	monitor.mutex.Lock()
+	monitor.record, monitor.success = record, success
+	monitor.mutex.Unlock()
 }
 
 func writeCompletedDependencyManifest(t *testing.T, root string) {
@@ -538,6 +643,7 @@ spec:
       arguments: ["--port", "${ports.backend}"]
       stop: {gracefulTimeout: 1s}
       readiness: {type: tcp, host: 127.0.0.1, port: "${ports.backend}", timeout: 3s, interval: 100ms}
+      liveness: {type: tcp, host: 127.0.0.1, port: "${ports.backend}", timeout: 3s, interval: 100ms}
     web:
       driver: process
       mode: daemon
@@ -548,6 +654,7 @@ spec:
       dependsOn: {backend: ready}
       stop: {gracefulTimeout: 1s}
       readiness: {type: tcp, host: 127.0.0.1, port: "${ports.web}", timeout: 3s, interval: 100ms}
+      liveness: {type: tcp, host: 127.0.0.1, port: "${ports.web}", timeout: 3s, interval: 100ms}
 `, backendPort, webPort)
 	if err := os.WriteFile(filepath.Join(root, ".stackpilot", "system.yaml"), []byte(contents), 0o600); err != nil {
 		t.Fatal(err)

@@ -47,6 +47,11 @@ func (*Lifecycle) Inspect(context.Context, ProjectIdentity) (ProjectObservation,
 	return ProjectObservation{}, fmt.Errorf("%w: Phase 2 Compose requires Windows", ErrPlatformUnsupported)
 }
 
+// ObserveResources reports the explicit non-Windows capability gate.
+func (*Lifecycle) ObserveResources(context.Context, string) (ResourceObservation, error) {
+	return ResourceObservation{}, ErrPlatformUnsupported
+}
+
 // Stop rejects non-Windows execution until Phase 3.
 func (*Lifecycle) Stop(context.Context, ProjectIdentity) error {
 	return fmt.Errorf("%w: Phase 2 Compose requires Windows", ErrPlatformUnsupported)

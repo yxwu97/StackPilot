@@ -48,6 +48,19 @@ type RuntimeObservation struct {
 	Forced   bool
 }
 
+// ResourceObservation contains one identity-verified full-runtime counter snapshot.
+type ResourceObservation struct {
+	ObservedAt      time.Time
+	CPUTotalMillis  int64
+	MemoryBytes     uint64
+	ActiveProcesses uint32
+}
+
+// ResourceObserver reads counters without changing runtime lifecycle state.
+type ResourceObserver interface {
+	ObserveResources(context.Context, RuntimeIdentity) (ResourceObservation, error)
+}
+
 // RecoveredRuntime is a verified runtime reattached after control-plane restart.
 type RecoveredRuntime struct {
 	Identity    RuntimeIdentity

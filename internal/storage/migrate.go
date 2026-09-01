@@ -11,8 +11,11 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
+
+const foreignKeysOffDirective = "-- stackpilot:foreign-keys-off"
 
 var (
 	// ErrMigrationChecksumMismatch indicates that an applied migration was edited.
@@ -181,7 +184,39 @@ func (m *migrator) validateApplied(applied []appliedMigration) error {
 }
 
 func (m *migrator) applyOne(ctx context.Context, database *sql.DB, item migration) (err error) {
-	transaction, err := database.BeginTx(ctx, nil)
+	if strings.HasPrefix(item.contents, foreignKeysOffDirective+"\n") {
+		return m.applyOneWithForeignKeysDisabled(ctx, database, item)
+	}
+	return m.applyOneTransaction(ctx, database, item, false)
+}
+
+type migrationBeginner interface {
+	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+}
+
+func (m *migrator) applyOneWithForeignKeysDisabled(ctx context.Context, database *sql.DB, item migration) (err error) {
+	connection, err := database.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration %d connection: %w", item.version, err)
+	}
+	defer func() {
+		if closeErr := connection.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close migration %d connection: %w", item.version, closeErr))
+		}
+	}()
+	if _, err = connection.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+		return fmt.Errorf("disable foreign keys for migration %d: %w", item.version, err)
+	}
+	defer func() {
+		if _, enableErr := connection.ExecContext(context.WithoutCancel(ctx), `PRAGMA foreign_keys=ON`); enableErr != nil {
+			err = errors.Join(err, fmt.Errorf("restore foreign keys after migration %d: %w", item.version, enableErr))
+		}
+	}()
+	return m.applyOneTransaction(ctx, connection, item, true)
+}
+
+func (m *migrator) applyOneTransaction(ctx context.Context, beginner migrationBeginner, item migration, checkForeignKeys bool) (err error) {
+	transaction, err := beginner.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin migration %d: %w", item.version, err)
 	}
@@ -195,6 +230,11 @@ func (m *migrator) applyOne(ctx context.Context, database *sql.DB, item migratio
 	if _, err = transaction.ExecContext(ctx, item.contents); err != nil {
 		return fmt.Errorf("execute migration %d_%s: %w", item.version, item.name, err)
 	}
+	if checkForeignKeys {
+		if err = checkMigrationForeignKeys(ctx, transaction); err != nil {
+			return fmt.Errorf("validate migration %d foreign keys: %w", item.version, err)
+		}
+	}
 	appliedAt := m.now().UTC().Format(time.RFC3339Nano)
 	if _, err = transaction.ExecContext(ctx, `INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (?, ?, ?, ?)`, item.version, item.name, item.checksum, appliedAt); err != nil {
 		return fmt.Errorf("record migration %d: %w", item.version, err)
@@ -203,4 +243,23 @@ func (m *migrator) applyOne(ctx context.Context, database *sql.DB, item migratio
 		return fmt.Errorf("commit migration %d: %w", item.version, err)
 	}
 	return nil
+}
+
+func checkMigrationForeignKeys(ctx context.Context, transaction *sql.Tx) error {
+	rows, err := transaction.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var table string
+		var rowID sql.NullInt64
+		var parent string
+		var foreignKeyID int
+		if err := rows.Scan(&table, &rowID, &parent, &foreignKeyID); err != nil {
+			return err
+		}
+		return fmt.Errorf("table %s row %v references %s foreign key %d", table, rowID, parent, foreignKeyID)
+	}
+	return rows.Err()
 }

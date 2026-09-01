@@ -35,6 +35,7 @@ func (engine *Engine) MonitorLiveness(ctx context.Context, request LivenessReque
 	successes, failures := 0, 0
 	for {
 		result := engine.checkOnce(ctx, request.Spec)
+		result.Purpose = PurposeLiveness
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

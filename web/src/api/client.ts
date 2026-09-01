@@ -1,4 +1,4 @@
-import type { ErrorEnvelope, Incident, IncidentDetail, LogEntry, Operation, OperationRef, SystemDetail, SystemRuntimeStatus, SystemSummary, VersionResponse, Workspace, WorkspaceDetail, WorkspaceImportDraft, WorkspaceImportOperation, WorkspaceProbe } from './types'
+import type { ChangePlan, ErrorEnvelope, Incident, IncidentDetail, LogEntry, MetricSeriesList, Operation, OperationRef, RevisionSummary, SystemDetail, SystemRuntimeStatus, SystemSummary, VersionResponse, Workspace, WorkspaceDetail, WorkspaceImportDraft, WorkspaceImportOperation, WorkspaceProbe } from './types'
 import { prepareMutationCSRF, publishAuthenticationInvalidation } from './auth-lifecycle.ts'
 
 const apiBase = '/api/v1'
@@ -240,5 +240,37 @@ export async function getIncident(id: string): Promise<IncidentDetail> {
 export async function analyzeIncident(id: string): Promise<OperationRef> {
   return request<OperationRef>(`/incidents/${encodeURIComponent(id)}/analyze`, {
     method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: '{}',
+  })
+}
+
+export async function getWorkspaceMetrics(
+  workspaceId: string,
+  from: Date,
+  to: Date,
+  granularity: 'detail' | 'hour',
+  serviceIds: string[] = [],
+): Promise<MetricSeriesList> {
+  const query = new URLSearchParams({ from: from.toISOString(), to: to.toISOString(), granularity })
+  for (const serviceId of serviceIds) query.append('serviceId', serviceId)
+  return request<MetricSeriesList>(`/workspaces/${encodeURIComponent(workspaceId)}/metrics?${query.toString()}`)
+}
+
+export async function listRevisions(workspaceId: string): Promise<RevisionSummary[]> {
+  return (await request<{ items: RevisionSummary[] }>(`/workspaces/${encodeURIComponent(workspaceId)}/revisions`)).items
+}
+
+export async function getChangePlan(id: string): Promise<ChangePlan> {
+  return request<ChangePlan>(`/change-plans/${encodeURIComponent(id)}`)
+}
+
+export async function createChangePlan(workspaceId: string): Promise<OperationRef> {
+  return request<OperationRef>(`/workspaces/${encodeURIComponent(workspaceId)}/change-plans`, {
+    method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: '{}',
+  })
+}
+
+export async function createVerifiedRestart(workspaceId: string, changePlanId: string): Promise<OperationRef> {
+  return request<OperationRef>(`/workspaces/${encodeURIComponent(workspaceId)}/verified-restart`, {
+    method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ changePlanId }),
   })
 }

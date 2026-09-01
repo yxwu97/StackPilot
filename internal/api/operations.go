@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"stackpilot/internal/domain"
+	"stackpilot/internal/health"
 	"stackpilot/internal/orchestrator"
 	"stackpilot/internal/security"
 	"stackpilot/internal/workspace"
@@ -66,16 +67,28 @@ type operationStepDTO struct {
 }
 
 type systemStatusDTO struct {
-	SystemID           string             `json:"systemId"`
-	WorkspaceID        string             `json:"workspaceId"`
-	State              string             `json:"state"`
-	InstanceID         string             `json:"instanceId,omitempty"`
-	ManifestDigest     string             `json:"manifestDigest,omitempty"`
-	ResolvedSpecDigest string             `json:"resolvedSpecDigest,omitempty"`
-	StartedAt          string             `json:"startedAt,omitempty"`
-	StoppedAt          *string            `json:"stoppedAt,omitempty"`
-	Services           []serviceStatusDTO `json:"services"`
-	Ports              []portStatusDTO    `json:"ports"`
+	SystemID           string              `json:"systemId"`
+	WorkspaceID        string              `json:"workspaceId"`
+	State              string              `json:"state"`
+	InstanceID         string              `json:"instanceId,omitempty"`
+	ManifestDigest     string              `json:"manifestDigest,omitempty"`
+	ResolvedSpecDigest string              `json:"resolvedSpecDigest,omitempty"`
+	StartedAt          string              `json:"startedAt,omitempty"`
+	StoppedAt          *string             `json:"stoppedAt,omitempty"`
+	Services           []serviceStatusDTO  `json:"services"`
+	Ports              []portStatusDTO     `json:"ports"`
+	HealthCoverage     []healthCoverageDTO `json:"healthCoverage"`
+}
+
+type healthCoverageDTO struct {
+	ServiceInstanceID     string  `json:"serviceInstanceId"`
+	ReadinessKind         string  `json:"readinessKind,omitempty"`
+	LivenessKind          string  `json:"livenessKind,omitempty"`
+	Coverage              string  `json:"coverage"`
+	SatisfiesVerification bool    `json:"satisfiesVerification"`
+	LatestSuccess         *bool   `json:"latestSuccess,omitempty"`
+	LatestErrorCode       string  `json:"latestErrorCode,omitempty"`
+	LatestCheckedAt       *string `json:"latestCheckedAt,omitempty"`
 }
 
 type portStatusDTO struct {
@@ -340,7 +353,7 @@ func mapOperation(operation orchestrator.Operation) operationDTO {
 }
 
 func mapSystemStatus(systemID domain.SystemID, workspaceID domain.WorkspaceID, status orchestrator.RuntimeStatus) systemStatusDTO {
-	result := systemStatusDTO{SystemID: systemID.String(), WorkspaceID: workspaceID.String(), State: string(domain.SystemStopped), Services: []serviceStatusDTO{}, Ports: []portStatusDTO{}}
+	result := systemStatusDTO{SystemID: systemID.String(), WorkspaceID: workspaceID.String(), State: string(domain.SystemStopped), Services: []serviceStatusDTO{}, Ports: []portStatusDTO{}, HealthCoverage: []healthCoverageDTO{}}
 	if status.System == nil {
 		return result
 	}
@@ -367,6 +380,7 @@ func mapSystemStatus(systemID domain.SystemID, workspaceID domain.WorkspaceID, s
 			})
 		}
 		result.Services = append(result.Services, mapped)
+		result.HealthCoverage = append(result.HealthCoverage, mapHealthCoverage(service.ID, status.HealthCoverage[service.ID]))
 	}
 	if status.Resolved != nil {
 		logicalNames := make([]string, 0, len(status.Resolved.Ports))
@@ -378,6 +392,21 @@ func mapSystemStatus(systemID domain.SystemID, workspaceID domain.WorkspaceID, s
 			port := status.Resolved.Ports[logicalName]
 			result.Ports = append(result.Ports, portStatusDTO{LogicalName: logicalName, Port: port.Port, Source: port.Source, Replaced: port.Replaced, ConflictPort: port.ConflictPort})
 		}
+	}
+	return result
+}
+
+func mapHealthCoverage(instanceID domain.ServiceInstanceID, summary health.CoverageSummary) healthCoverageDTO {
+	result := healthCoverageDTO{
+		ServiceInstanceID: instanceID.String(), ReadinessKind: string(summary.ReadinessKind),
+		LivenessKind: string(summary.LivenessKind), Coverage: string(summary.Coverage),
+		SatisfiesVerification: summary.SatisfiesVerification,
+	}
+	if summary.Latest != nil {
+		success := summary.Latest.Success
+		result.LatestSuccess = &success
+		result.LatestErrorCode = string(summary.Latest.ErrorCode)
+		result.LatestCheckedAt = optionalAPITime(&summary.Latest.CheckedAt)
 	}
 	return result
 }
@@ -424,6 +453,18 @@ func operationBoundaryError(err error) (ErrorCode, bool) {
 		return ErrorRequestValidationFailed, true
 	case errors.Is(err, orchestrator.ErrManifestChanged):
 		return ErrorManifestChanged, true
+	case errors.Is(err, orchestrator.ErrChangePlanStale):
+		return ErrorChangePlanStale, true
+	case errors.Is(err, orchestrator.ErrChangePlanBlocked):
+		return ErrorChangePlanBlocked, true
+	case errors.Is(err, orchestrator.ErrChangePlanInvalidState):
+		return ErrorChangePlanInvalidState, true
+	case errors.Is(err, orchestrator.ErrVerificationHealthIncomplete):
+		return ErrorVerificationHealthIncomplete, true
+	case errors.Is(err, orchestrator.ErrVerificationUnavailable):
+		return ErrorVerificationUnavailable, true
+	case errors.Is(err, orchestrator.ErrVerificationFailed):
+		return ErrorVerificationFailed, true
 	default:
 		return "", false
 	}

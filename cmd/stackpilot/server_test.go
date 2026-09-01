@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -58,6 +59,80 @@ func TestWaitForServerShutsDownAfterCancellation(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), `"http server stopped"`) || !strings.Contains(logs.String(), `"reason":"context_cancelled"`) {
 		t.Fatalf("shutdown logs = %q, want context-cancelled stop event", logs.String())
+	}
+}
+
+func TestRunServerCancelsWorkersWhenListenerCreationFails(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve listener error = %v", err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dataDir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runServer(ctx, []string{"--port", fmt.Sprint(port), "--data-dir", dataDir}, &stdout, &stderr)
+	}()
+	select {
+	case exitCode := <-done:
+		if exitCode != 1 || !strings.Contains(stderr.String(), `"error_code":"HTTP_LISTENER_CREATE_FAILED"`) {
+			t.Fatalf("runServer(listener conflict) = %d, logs = %s", exitCode, stderr.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("runServer waited for background workers after listener creation failed")
+	}
+}
+
+func TestShutdownControlPlaneCancelsActiveMetricSampler(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	dataDir := t.TempDir()
+	var logs bytes.Buffer
+	logger := newLogger(&logs)
+	plane, err := newControlPlane(ctx, serverConfig{dataDir: dataDir}, logger)
+	if err != nil {
+		cancel()
+		t.Fatalf("newControlPlane() error = %v", err)
+	}
+	dependencies, err := newOrchestrationDependencies(plane.database, events.NewBroker(1), dataDir)
+	if err != nil {
+		exitCode := 0
+		shutdownControlPlane(cancel, plane, logger, &exitCode)
+		t.Fatalf("newOrchestrationDependencies() error = %v", err)
+	}
+	repository, err := storage.NewMetricRepository(plane.database)
+	if err != nil {
+		exitCode := 0
+		shutdownControlPlane(cancel, plane, logger, &exitCode)
+		t.Fatalf("NewMetricRepository() error = %v", err)
+	}
+	plane.metricSampler, err = newMetricSampler(repository, dependencies, logger)
+	if err != nil {
+		exitCode := 0
+		shutdownControlPlane(cancel, plane, logger, &exitCode)
+		t.Fatalf("newMetricSampler() error = %v", err)
+	}
+	if err := plane.metricSampler.Start(ctx); err != nil {
+		exitCode := 0
+		shutdownControlPlane(cancel, plane, logger, &exitCode)
+		t.Fatalf("metric sampler Start() error = %v", err)
+	}
+	exitCode := 0
+	done := make(chan struct{})
+	go func() {
+		shutdownControlPlane(cancel, plane, logger, &exitCode)
+		close(done)
+	}()
+	select {
+	case <-done:
+		if exitCode != 0 {
+			t.Fatalf("shutdown exit code = %d, logs = %s", exitCode, logs.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("shutdown waited on the active metric sampler before canceling its context")
 	}
 }
 

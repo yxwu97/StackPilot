@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -354,6 +355,87 @@ func TestLifecycleRecoversAndDiscoversProjectIdentity(t *testing.T) {
 	}
 }
 
+func TestLifecycleResourceObservationDoesNotBlockStop(t *testing.T) {
+	request, docker := lifecycleFixture(t)
+	identity, err := newProjectIdentity(normalizedLifecycleRequest(request))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := EncodeProjectIdentity(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idA, idB := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	psOutput := []byte(strings.NewReplacer("db-id", idA, "web-id", idB).Replace(string(lifecyclePSOutput(t, request))))
+	statsOutput := []byte(fmt.Sprintf("{\"ID\":%q,\"CPUPerc\":\"0%%\",\"MemUsage\":\"1MiB / 2GiB\"}\n{\"ID\":%q,\"CPUPerc\":\"0%%\",\"MemUsage\":\"2MiB / 2GiB\"}\n", idA, idB))
+	enteredStats := make(chan struct{})
+	releaseStats := make(chan struct{})
+	stopRan := make(chan struct{}, 1)
+
+	lifecycle, err := NewLifecycle(LifecycleConfig{
+		DockerExecutable: docker,
+		Run: func(ctx context.Context, _ string, arguments []string, _ string, _ map[string]string) (CommandOutput, error) {
+			switch arguments[0] {
+			case "compose":
+				if containsArgument(arguments, "ps") {
+					return CommandOutput{Stdout: psOutput}, nil
+				}
+				if containsArgument(arguments, "stop") {
+					stopRan <- struct{}{}
+					return CommandOutput{}, nil
+				}
+			case "stats":
+				close(enteredStats)
+				select {
+				case <-releaseStats:
+					return CommandOutput{Stdout: statsOutput}, nil
+				case <-ctx.Done():
+					return CommandOutput{}, ctx.Err()
+				}
+			}
+			return CommandOutput{}, fmt.Errorf("unexpected Docker arguments: %v", arguments)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observeDone := make(chan error, 1)
+	go func() {
+		_, observeErr := lifecycle.ObserveResources(context.Background(), token)
+		observeDone <- observeErr
+	}()
+	select {
+	case <-enteredStats:
+	case <-time.After(time.Second):
+		t.Fatal("resource observation did not enter Docker stats")
+	}
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- lifecycle.Stop(context.Background(), identity) }()
+	select {
+	case stopErr := <-stopDone:
+		if stopErr != nil {
+			t.Fatalf("Stop() while stats was blocked error = %v", stopErr)
+		}
+	case <-time.After(time.Second):
+		close(releaseStats)
+		t.Fatal("Stop() waited for blocked resource observation")
+	}
+	select {
+	case <-stopRan:
+	default:
+		t.Fatal("Stop() completed without running the fixed Compose stop command")
+	}
+	close(releaseStats)
+	select {
+	case observeErr := <-observeDone:
+		if observeErr != nil {
+			t.Fatalf("ObserveResources() after release error = %v", observeErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("resource observation did not finish after Docker stats was released")
+	}
+}
+
 func discoveryInspectOutput(t *testing.T, identity ProjectIdentity, idA, idB string) []byte {
 	t.Helper()
 	record := func(id, service string) map[string]any {
@@ -387,7 +469,8 @@ func TestInstalledComposeLifecycle(t *testing.T) {
 	buildLinuxFixture(t, root)
 	writeLifecycleComposeFixture(t, root, image)
 	runGateCommand(t, root, docker, "build", "--tag", image, "--file", filepath.Join(root, "Dockerfile"), root)
-	request := lifecycleIntegrationRequest(t, root, dataDir)
+	request := lifecycleIntegrationRequestForServices(t, root, dataDir, []string{"database", "web"})
+	request.Readiness = map[string]string{"database": "healthy", "web": "healthy"}
 	project, _ := ProjectName(request.SystemID, request.WorkspaceID, request.InstanceID)
 	t.Cleanup(func() {
 		cleanupContext, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -416,6 +499,11 @@ func TestInstalledComposeLifecycle(t *testing.T) {
 	token, err := EncodeProjectIdentity(identity)
 	if err != nil {
 		t.Fatal(err)
+	}
+	resources, err := lifecycle.ObserveResources(context.Background(), token)
+	if err != nil || resources.ObservedAt.Location() != time.UTC || resources.MemoryBytes <= 0 ||
+		resources.CPUPercent < 0 || resources.CPUPercent > 100 || !resourceServices(resources, "database", "web") {
+		t.Fatalf("ObserveResources(real Compose) = %#v, %v", resources, err)
 	}
 	restarted, _ := NewLifecycle(LifecycleConfig{DockerExecutable: docker})
 	recovered, recoveredObservation, err := restarted.Recover(context.Background(), token)
@@ -642,13 +730,27 @@ func buildLinuxFixture(t *testing.T, root string) {
 func writeLifecycleComposeFixture(t *testing.T, root, image string) {
 	t.Helper()
 	dockerfile := "FROM scratch\nCOPY fixture /fixture\nENTRYPOINT [\"/fixture\",\"--mode\",\"hold-port\",\"--port\",\"5432\"]\n"
-	composeFile := fmt.Sprintf("services:\n  database:\n    image: %s\n    volumes: [gate-data:/data]\n    healthcheck:\n      test: [\"CMD\", \"/fixture\", \"-version\"]\n      interval: 1s\n      timeout: 1s\n      retries: 10\nvolumes:\n  gate-data: {}\n", image)
+	service := "    image: %s\n    healthcheck:\n      test: [\"CMD\", \"/fixture\", \"-version\"]\n      interval: 1s\n      timeout: 1s\n      retries: 10\n"
+	composeFile := fmt.Sprintf("services:\n  database:\n"+service+"    volumes: [gate-data:/data]\n  web:\n"+service+"volumes:\n  gate-data: {}\n", image, image)
 	if err := os.WriteFile(filepath.Join(root, "Dockerfile"), []byte(dockerfile), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "compose.yaml"), []byte(composeFile), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func resourceServices(observation ResourceObservation, expected ...string) bool {
+	if len(observation.Containers) != len(expected) {
+		return false
+	}
+	actual := make([]string, 0, len(observation.Containers))
+	for _, container := range observation.Containers {
+		actual = append(actual, container.ComposeService)
+	}
+	sort.Strings(actual)
+	sort.Strings(expected)
+	return reflect.DeepEqual(actual, expected)
 }
 
 func writeControlledBuildComposeFixture(t *testing.T, root, image string) {
@@ -664,10 +766,14 @@ func writeControlledBuildComposeFixture(t *testing.T, root, image string) {
 }
 
 func lifecycleIntegrationRequest(t *testing.T, root, dataDir string) LifecycleRequest {
+	return lifecycleIntegrationRequestForServices(t, root, dataDir, []string{"database"})
+}
+
+func lifecycleIntegrationRequestForServices(t *testing.T, root, dataDir string, services []string) LifecycleRequest {
 	t.Helper()
 	port := availableLoopbackPort(t)
 	overrideRequest := validOverrideRequest()
-	overrideRequest.Services = []string{"database"}
+	overrideRequest.Services = append([]string(nil), services...)
 	overrideRequest.Ports = map[string]PortOverride{"database": {Service: "database", Target: 5432, Published: port}}
 	overrideRequest.Environment = map[string]map[string]string{"database": {"DATABASE_PORT": strconv.Itoa(port)}}
 	generator, err := NewOverrideGenerator(dataDir)
@@ -681,7 +787,7 @@ func lifecycleIntegrationRequest(t *testing.T, root, dataDir string) LifecycleRe
 	return LifecycleRequest{
 		WorkspaceRoot: root, DataDir: dataDir, ComposeFile: filepath.Join(root, "compose.yaml"), OverrideFile: override.Path,
 		SystemID: overrideRequest.SystemID, WorkspaceID: overrideRequest.WorkspaceID, InstanceID: overrideRequest.InstanceID,
-		Services: []string{"database"}, StartTimeout: 45 * time.Second, StopTimeout: 5 * time.Second,
+		Services: append([]string(nil), services...), StartTimeout: 45 * time.Second, StopTimeout: 5 * time.Second,
 	}
 }
 

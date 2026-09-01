@@ -45,6 +45,7 @@ func (engine *Engine) Await(ctx context.Context, request Request) (Outcome, erro
 	consecutive := 0
 	for {
 		result := engine.checkOnce(readinessContext, request.Spec)
+		result.Purpose = PurposeReadiness
 		var err error
 		result, err = engine.record(readinessContext, request.ServiceInstanceID, result)
 		if err != nil {

@@ -269,6 +269,18 @@ func (repository *WorkspaceRepository) getManifestView(ctx context.Context, dige
 	return view, err
 }
 
+// ManifestByDigest returns one immutable manifest snapshot by its content digest.
+func (repository *WorkspaceRepository) ManifestByDigest(ctx context.Context, digest string) (workspace.ManifestView, error) {
+	if len(digest) != 64 {
+		return workspace.ManifestView{}, workspace.ErrNotFound
+	}
+	view, err := repository.getManifestView(ctx, digest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return workspace.ManifestView{}, workspace.ErrNotFound
+	}
+	return view, err
+}
+
 func (repository *WorkspaceRepository) listServiceDefinitions(ctx context.Context, id domain.WorkspaceID) ([]workspace.ServiceDefinition, error) {
 	rows, err := repository.database.QueryContext(ctx, `SELECT service_id, driver, mode, required, definition_digest
         FROM services WHERE workspace_id = ? ORDER BY service_id`, id.String())

@@ -263,17 +263,17 @@ func sameProcessIdentity(actual, expected ProcessIdentity) bool {
 func (runtime *server) responseFor(request Request, payload any, requestErr error) (Response, bool) {
 	if requestErr != nil {
 		if errors.Is(requestErr, errInvalidMessage) || errors.Is(requestErr, errVersionMismatch) {
-			return ErrorResponse(request.RequestID, requestErr), false
+			return errorResponseForVersion(request.Version, request.RequestID, requestErr), false
 		}
-		return failureResponse(request.RequestID, ErrorIdentityMismatch), false
+		return failureResponse(request.Version, request.RequestID, ErrorIdentityMismatch), false
 	}
 	value, code, shutdown := runtime.dispatch(request.Type, payload)
 	if code != "" {
-		return failureResponse(request.RequestID, code), false
+		return failureResponse(request.Version, request.RequestID, code), false
 	}
-	response, err := SuccessResponse(request.RequestID, value)
+	response, err := successResponseForVersion(request.Version, request.RequestID, value)
 	if err != nil {
-		return failureResponse(request.RequestID, ErrorInternal), false
+		return failureResponse(request.Version, request.RequestID, ErrorInternal), false
 	}
 	return response, shutdown
 }
@@ -288,6 +288,9 @@ func (runtime *server) dispatch(messageType MessageType, payload any) (any, Erro
 	case MessageInspectService:
 		status, code := runtime.inspectService(payload.(*ServiceRequest).ServiceID)
 		return status, code, false
+	case MessageObserveService:
+		observation, code := runtime.observeService(payload.(*ServiceRequest).ServiceID)
+		return observation, code, false
 	case MessageStopService:
 		request := payload.(*StopServiceRequest)
 		status, code := runtime.stopService(request.ServiceID, time.Duration(request.GracefulTimeoutMillis)*time.Millisecond)
@@ -300,6 +303,21 @@ func (runtime *server) dispatch(messageType MessageType, payload any) (any, Erro
 	default:
 		return nil, ErrorInvalidMessage, false
 	}
+}
+
+func (runtime *server) observeService(serviceID string) (ResourceObservation, ErrorCode) {
+	entry := runtime.service(serviceID)
+	if entry == nil {
+		return ResourceObservation{}, ErrorServiceNotFound
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	observation, err := entry.service.resources()
+	if err != nil {
+		runtime.logServiceError(serviceID, err)
+		return ResourceObservation{}, ErrorInternal
+	}
+	return observation, ""
 }
 
 func (runtime *server) startService(request StartServiceRequest) (ServiceStatus, ErrorCode) {
@@ -415,14 +433,14 @@ func (runtime *server) removeInstanceLock() error {
 	return removeIdentityFile(runtime.lockPath)
 }
 
-func failureResponse(requestID string, code ErrorCode) Response {
+func failureResponse(version int, requestID string, code ErrorCode) Response {
 	messages := map[ErrorCode]string{
 		ErrorInvalidMessage: "The Supervisor request is invalid.", ErrorVersionMismatch: "The Supervisor protocol version is incompatible.",
 		ErrorServiceExists: "The service is already supervised.", ErrorServiceNotFound: "The service is not supervised.",
 		ErrorIdentityMismatch: "The process identity could not be verified.", ErrorSupervisorNotEmpty: "The Supervisor still owns services.",
 		ErrorInternal: "The Supervisor could not complete the request.",
 	}
-	return Response{Version: ProtocolVersion, RequestID: requestID, Error: &ProtocolError{Code: code, Message: messages[code]}}
+	return Response{Version: version, RequestID: requestID, Error: &ProtocolError{Code: code, Message: messages[code]}}
 }
 
 func (runtime *server) logConnectionError(err error) {

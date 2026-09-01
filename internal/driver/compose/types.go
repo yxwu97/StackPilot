@@ -39,6 +39,7 @@ var (
 	ErrLogFollowFailed           = errors.New("Docker Compose log follow failed")
 	ErrDiscoveryFailed           = errors.New("Docker Compose project discovery failed")
 	ErrPlatformUnsupported       = errors.New("Docker Compose is unsupported on this platform")
+	ErrResourceStatsUnavailable  = errors.New("Docker Compose resource stats are unavailable")
 )
 
 // CommandOutput holds bounded command streams that are never persisted by preflight.
@@ -163,6 +164,22 @@ type ContainerObservation struct {
 type ProjectObservation struct {
 	State      string
 	Containers []ContainerObservation
+}
+
+// ContainerResourceObservation is one exact managed-container measurement.
+type ContainerResourceObservation struct {
+	ID             string
+	ComposeService string
+	CPUPercent     float64
+	MemoryBytes    int64
+}
+
+// ResourceObservation aggregates one strictly identified Compose service group.
+type ResourceObservation struct {
+	ObservedAt  time.Time
+	CPUPercent  float64
+	MemoryBytes int64
+	Containers  []ContainerResourceObservation
 }
 
 // HealthObservation is one bounded persistence-safe Compose health result.

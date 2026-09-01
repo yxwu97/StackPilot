@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "ro04-real-runtime-fixtures/v1",
+  "generatedAt": "2026-08-31T07:53:24.8974977Z",
+  "platform": "windows/amd64",
+  "goVersion": "go1.26.6",
+  "docker": {
+    "desktopVersion": "4.77.0",
+    "engineVersion": "29.5.3",
+    "composeVersion": "5.1.4"
+  },
+  "processFixture": {
+    "command": "go test ./internal/platform/windows/supervisor ./internal/driver/process -count=1",
+    "status": "passed",
+    "supervisorPackageSeconds": 1.507,
+    "processDriverPackageSeconds": 0.740,
+    "assertions": [
+      "protocol-v2-resource-message",
+      "identity-verified-job-object",
+      "active-processes-at-least-two",
+      "memory-bytes-positive",
+      "utc-observation",
+      "v1-lifecycle-inspect-compatible",
+      "v1-resource-observation-unsupported"
+    ]
+  },
+  "installedCandidateFixture": {
+    "status": "passed",
+    "seconds": 0.15,
+    "assertions": [
+      "temporary-versions-sha256-layout",
+      "marker-selected-candidate",
+      "same-account-supervisor-hello",
+      "old-supervisor-safe-shutdown",
+      "real-installation-unchanged"
+    ]
+  },
+  "composeFixture": {
+    "command": "STACKPILOT_COMPOSE_LIFECYCLE_INTEGRATION=1 go test ./internal/driver/compose -run TestInstalledComposeLifecycle -count=1 -v",
+    "status": "passed",
+    "seconds": 12.27,
+    "containerCount": 2,
+    "composeServices": [
+      "database",
+      "web"
+    ],
+    "assertions": [
+      "strict-project-and-container-identity",
+      "aggregate-memory-positive",
+      "normalized-cpu-bounded",
+      "recovery-and-discovery",
+      "non-destructive-stop"
+    ]
+  },
+  "deterministicConcurrencyFixture": {
+    "command": "go test ./internal/driver/compose -count=1",
+    "status": "passed",
+    "packageSeconds": 1.385,
+    "assertions": [
+      "blocked-stats-entered",
+      "fixed-compose-stop-completed-before-stats-release",
+      "resource-observation-completed-after-release",
+      "no-real-docker-lifecycle-side-effects"
+    ]
+  },
+  "controlPlaneShutdownFixture": {
+    "command": "go test ./cmd/stackpilot -run 'TestRunServerCancelsWorkersWhenListenerCreationFails|TestShutdownControlPlaneCancelsActiveMetricSampler|TestWaitForServerShutsDownAfterCancellation' -count=1 -v",
+    "status": "passed",
+    "packageSeconds": 1.09,
+    "assertions": [
+      "listener-failure-cancels-workers-with-live-parent-context",
+      "active-sampler-uses-real-sqlite-and-runtime-repository",
+      "cancel-before-worker-wait",
+      "database-close-after-worker-wait"
+    ]
+  },
+  "cleanup": {
+    "containersRemaining": 0,
+    "imagesRemaining": 0,
+    "volumesRemaining": 0
+  },
+  "productionRuntimeGate": {
+    "status": "blocked",
+    "evidence": "ro04-runtime-observation.json",
+    "reason": "AIWS production Compose identity returned aggregate stats for six exact containers. A temporary installation fixture proved trusted candidate takeover, but the development Gate executable remains outside the real trusted installation; an actual installed upgrade is still required to verify production process handoff."
+  }
+}

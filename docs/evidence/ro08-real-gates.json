@@ -1,0 +1,88 @@
+{
+  "schemaVersion": "ro08-real-gates/v1",
+  "generatedAt": "2026-09-01T02:13:02.0898678Z",
+  "candidate": {
+    "version": "0.1.1",
+    "sha256": "8c76b454e32645bb80fe224295f674e3dd7779a38f1b129b080c887561b6199b",
+    "installed": true,
+    "controlPlaneState": "running",
+    "databaseVersion": 19,
+    "publishedPhase3Capabilities": [
+      "phase3.change-planning",
+      "phase3.resource-monitoring"
+    ],
+    "unpublishedPhase3Capabilities": [
+      "phase3.verified-restart"
+    ]
+  },
+  "controlDatabaseBackup": {
+    "path": "output/backups/stackpilot-pre-ro08-20260901.db",
+    "sha256": "b5d86bb7fe6e156fca324aa1fd0f0f10acb64c6f24fa7ffeb0b376e085d2bc4b"
+  },
+  "automatedChecks": {
+    "command": ".\\scripts\\check.ps1",
+    "result": "passed",
+    "versionValidation": "passed",
+    "webTests": { "passed": 28, "failed": 0 },
+    "typeCheck": "passed",
+    "webProductionBuild": "passed",
+    "goTestAll": "passed",
+    "goVetAll": "passed"
+  },
+  "changePlanning": {
+    "gateStatus": "passed",
+    "realPlans": [
+      { "systemId": "btc", "planId": "plan_01M1DBNT6PDTN8SZ0BS2ZV844K", "state": "ready", "risk": "high", "blockedCount": 0 },
+      { "systemId": "pms", "planId": "plan_01M1DAGF8MNYPZHY2CEX4HX6BW", "state": "ready", "risk": "high", "blockedCount": 0 },
+      { "systemId": "agenthub", "planId": "plan_01M1C4FTBVY19J2DF9V5M0T9M2", "state": "ready", "risk": "high", "blockedCount": 0 },
+      { "systemId": "gnmarket", "planId": "plan_01M1C4FRFWG35R4V7AC0Z1WRXN", "state": "ready", "risk": "high", "blockedCount": 0 },
+      { "systemId": "aiws", "state": "failed", "reason": "running revision unavailable while stopped" }
+    ],
+    "browser": {
+      "target": "http://127.0.0.1:32100",
+      "authenticatedWithOneTimeBootstrap": true,
+      "facts": [
+        "BTC rendered 2/2 process-job metric series and complete business health coverage after ordinary recovery.",
+        "ChangePlan submission completed through the Web and refreshed to the current running and workspace revisions.",
+        "Verified Restart remained disabled because its capability was not published.",
+        "Two metric requests returned explicit 503 responses while BTC was transitioning; subsequent polling recovered without reauthentication."
+      ],
+      "screenshots": [
+        { "path": "output/playwright/ro08-change-plan-enabled.png", "sha256": "c65592575f659b37c0019e80a5f7cf2c9626021a286432d13f8629205ff77d11" },
+        { "path": "output/playwright/ro08-btc-running-change-plan.png", "sha256": "116a84e58a06c219bef372e4682af47ca3ea2c5c24afe1501b30ad7757ddcef1" }
+      ]
+    }
+  },
+  "verifiedRestart": {
+    "gateStatus": "blocked",
+    "capabilityPublished": false,
+    "ordinaryRecoveryEvidence": [
+      { "systemId": "btc", "stopOperationId": "op_01M1DAVZ1KRA3W3VCN45PM9B2Y", "startOperationId": "op_01M1DAWD4137SHB9D0A6EMCPGD", "result": "running-ready" },
+      { "systemId": "pms", "startOperationId": "op_01M1DAY0ZJ8R6D3V2XV5BY8JY6", "errorCode": "HEALTH_READINESS_TIMEOUT", "failureStep": "wait-ready:rag", "cleanupResult": "stopped" },
+      { "systemId": "aiws", "startOperationId": "op_01M1DB6A2JPF6NMSQYA0MJB9M8", "errorCode": "COMPOSE_PREFLIGHT_TIMEOUT", "failureStep": "compose-preflight:infrastructure", "cleanupResult": "compose stop also timed out" },
+      { "systemId": "agenthub", "stopOperationId": "op_01M1DBH5KP2YDM8BTDZTHE1GZK", "errorCode": "COMPOSE_PREFLIGHT_TIMEOUT", "failureStep": "stop:infrastructure", "cleanupResult": "process services stopped; compose identity unresolved" },
+      { "systemId": "gnmarket", "startOperationId": "op_01M1DBG11BCZB22YMRNAJPWHAP", "errorCode": "PROCESS_EXITED", "failureStep": "wait-ready:web", "cleanupResult": "stopped" }
+    ],
+    "finalRuntimeStates": {
+      "btc": "running",
+      "pms": "stopped",
+      "aiws": "failed",
+      "agenthub": "failed",
+      "gnmarket": "stopped"
+    },
+    "notExecuted": [
+      "Five-system Verified Restart success Gate",
+      "Verified Restart real failure, cancellation, and interrupted-control-plane browser flows",
+      "Publication of phase3.verified-restart"
+    ]
+  },
+  "safety": {
+    "dockerDesktopStarted": false,
+    "flywayRepairExecuted": false,
+    "businessDatabaseModifiedByGateTooling": false,
+    "workspaceFilesModifiedForGate": false,
+    "gitStateModified": false,
+    "secretsPrinted": false,
+    "automaticRollbackClaimed": false
+  }
+}

@@ -137,6 +137,68 @@ export interface VersionResponse {
   capabilities: string[]
 }
 
+export type MetricStatus = 'available' | 'unavailable' | 'unsupported'
+
+export interface MetricPoint {
+  observedAt: string
+  status: MetricStatus
+  cpuPercent?: number
+  memoryBytes?: number
+  processCount?: number
+  containerCount?: number
+  reasonCode?: string
+}
+
+export interface MetricSeries {
+  serviceId: string
+  source: 'process-job' | 'compose'
+  points: MetricPoint[]
+}
+
+export interface MetricSeriesList {
+  from: string
+  to: string
+  granularity: 'detail' | 'hour'
+  series: MetricSeries[]
+}
+
+export interface RevisionSummary {
+  id: string
+  workspaceId: string
+  systemId: string
+  systemInstanceId?: string
+  kind: 'running' | 'workspace'
+  schemaVersion: string
+  digest: string
+  createdAt: string
+}
+
+export type ChangeRisk = 'info' | 'low' | 'medium' | 'high' | 'blocked'
+
+export interface ChangePlanItem {
+  kind: 'manifest' | 'service' | 'dependency' | 'runner' | 'port' | 'health' | 'restart' | 'dependency-file' | 'compose' | 'secret'
+  change: 'added' | 'removed' | 'changed'
+  risk: ChangeRisk
+  key: string
+  summary: string
+}
+
+export interface ChangePlan {
+  id: string
+  workspaceId: string
+  systemId: string
+  createdByOperationId: string
+  fromRevision: RevisionSummary
+  toRevision: RevisionSummary
+  ruleVersion: string
+  state: 'ready' | 'blocked'
+  risk: ChangeRisk
+  itemCount: number
+  blockedCount: number
+  items: ChangePlanItem[]
+  createdAt: string
+}
+
 export type RuntimeState = 'stopping' | 'failed' | 'starting' | 'degraded' | 'running' | 'stopped'
 export type ServiceState = 'stopped' | 'waiting_dependency' | 'starting' | 'waiting_ready' | 'ready' | 'degraded' | 'completed' | 'stopping' | 'failed' | 'unknown'
 export type OperationState = 'queued' | 'running' | 'cancelling' | 'succeeded' | 'failed' | 'cancelled'
@@ -182,6 +244,18 @@ export interface SystemRuntimeStatus {
   stoppedAt?: string
   services: ServiceRuntimeStatus[]
   ports: PortRuntimeStatus[]
+  healthCoverage?: HealthCoverageSummary[]
+}
+
+export interface HealthCoverageSummary {
+  serviceInstanceId: string
+  readinessKind?: 'process' | 'tcp' | 'http' | 'compose'
+  livenessKind?: 'process' | 'tcp' | 'http' | 'compose'
+  coverage: 'business' | 'container' | 'process-only' | 'unavailable'
+  satisfiesVerification: boolean
+  latestSuccess?: boolean
+  latestErrorCode?: string
+  latestCheckedAt?: string
 }
 
 export interface OperationStep {
@@ -200,7 +274,7 @@ export interface Operation {
   id: string
   workspaceId: string
   systemId: string
-  type: 'start' | 'stop' | 'restart' | 'service-restart' | 'port-plan' | 'refresh' | 'analyze'
+  type: 'start' | 'stop' | 'restart' | 'service-restart' | 'port-plan' | 'refresh' | 'analyze' | 'change-plan' | 'verified-restart'
   state: OperationState
   cancellable: boolean
   cancelRequestedAt?: string
@@ -253,6 +327,9 @@ export interface IncidentContext {
   systemInstanceId?: string
   serviceInstanceId?: string
   serviceId?: string
+  operationId?: string
+  changePlanId?: string
+  revisionId?: string
   kind: string
   triggerCode: string
   windowStart: string

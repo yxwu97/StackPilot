@@ -95,6 +95,26 @@ func TestRuntimeReconciliationSkipsWorkspaceWithActiveOperation(t *testing.T) {
 	}
 }
 
+func TestRuntimeReconciliationSkipsStaleServiceSnapshot(t *testing.T) {
+	fixture := newReconciliationFixtureWithConflict(t, driver.ErrRuntimeNotFound)
+	if err := fixture.service.ReconcileRuntimes(context.Background()); err != nil {
+		t.Fatalf("ReconcileRuntimes() error = %v", err)
+	}
+	status, err := fixture.service.Status(context.Background(), fixture.workspaceID)
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if status.Services[0].State != domain.ServiceStopping || status.Services[0].StateVersion != 4 {
+		t.Fatalf("concurrent service fact = (%s, version %d), want (stopping, version 4)", status.Services[0].State, status.Services[0].StateVersion)
+	}
+	if status.System.State != domain.SystemRunning || status.System.LastReconciledAt != nil {
+		t.Fatalf("aggregate/marker changed after stale snapshot = (%s, %v)", status.System.State, status.System.LastReconciledAt)
+	}
+	if fixture.driver.starts != 0 || fixture.driver.stops != 0 {
+		t.Fatalf("stale reconciliation lifecycle side effects = starts %d, stops %d", fixture.driver.starts, fixture.driver.stops)
+	}
+}
+
 func TestReconcileDiscoversIdentityBeforeDatabaseAttachment(t *testing.T) {
 	fixture := newReconciliationFixture(t, nil)
 	if _, err := fixture.database.Exec(`UPDATE service_instances SET state='starting', pid=NULL,
@@ -144,6 +164,26 @@ func TestReconcileKeepsFailedRuntimeWithoutIdentity(t *testing.T) {
 	}
 }
 
+func TestReconcileMarksExitedUnknownRuntimeFailed(t *testing.T) {
+	fixture := newReconciliationFixture(t, driver.ErrRuntimeNotFound)
+	if _, err := fixture.database.Exec(`UPDATE service_instances SET state='unknown', state_version=state_version+1 WHERE id=?`, fixture.serviceID.String()); err != nil {
+		t.Fatalf("seed unknown runtime: %v", err)
+	}
+	if _, err := fixture.database.Exec(`UPDATE system_instances SET state='failed', last_reconciled_at=NULL WHERE id=?`, reconciliationSystemID.String()); err != nil {
+		t.Fatalf("seed failed system: %v", err)
+	}
+	if err := fixture.service.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	status, err := fixture.service.Status(context.Background(), fixture.workspaceID)
+	if err != nil || status.Services[0].State != domain.ServiceFailed || status.System.State != domain.SystemFailed {
+		t.Fatalf("exited unknown RuntimeStatus() = (%#v, %v)", status, err)
+	}
+	if status.System.LastReconciledAt == nil || fixture.driver.starts != 0 || fixture.driver.stops != 0 {
+		t.Fatalf("unknown runtime reconciliation marker/side effects = (%v, starts %d, stops %d)", status.System.LastReconciledAt, fixture.driver.starts, fixture.driver.stops)
+	}
+}
+
 func TestReconcileSettlesExitedOneshotFromPersistedMode(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -184,6 +224,14 @@ type reconciliationFixture struct {
 }
 
 func newReconciliationFixture(t *testing.T, recoverError error) *reconciliationFixture {
+	return newReconciliationFixtureValue(t, recoverError, false)
+}
+
+func newReconciliationFixtureWithConflict(t *testing.T, recoverError error) *reconciliationFixture {
+	return newReconciliationFixtureValue(t, recoverError, true)
+}
+
+func newReconciliationFixtureValue(t *testing.T, recoverError error, injectConflict bool) *reconciliationFixture {
 	t.Helper()
 	dataDir := t.TempDir()
 	database, err := storage.OpenDataDir(context.Background(), dataDir)
@@ -218,7 +266,7 @@ func newReconciliationFixture(t *testing.T, recoverError error) *reconciliationF
 	loader, _ := manifest.NewLoader()
 	workspaceRepository, _ := storage.NewWorkspaceRepository(database)
 	workspaces, _ := workspace.NewManager(workspaceRepository, loader, manifest.NewValidator())
-	fixture.service, err = orchestrator.NewSingleService(orchestrator.SingleServiceConfig{
+	config := orchestrator.SingleServiceConfig{
 		Context: context.Background(), Operations: operations, Workspaces: workspaces,
 		Runner: reconciliationRunner{}, Driver: driverValue, Runtime: runtimeRepository,
 		Readiness: reconciliationReadiness{}, DataDir: dataDir,
@@ -229,12 +277,35 @@ func newReconciliationFixture(t *testing.T, recoverError error) *reconciliationF
 			fixture.resumed = append(fixture.resumed, request)
 			return fakeReconciliationCapture{}, nil
 		},
-	})
+	}
+	if injectConflict {
+		config.Runtime = &conflictingReconciliationRepository{RuntimeInstanceRepository: runtimeRepository}
+	}
+	fixture.service, err = orchestrator.NewSingleService(config)
 	if err != nil {
 		t.Fatalf("NewSingleService() error = %v", err)
 	}
 	t.Cleanup(fixture.service.Wait)
 	return fixture
+}
+
+type conflictingReconciliationRepository struct {
+	*storage.RuntimeInstanceRepository
+	injected bool
+}
+
+func (repository *conflictingReconciliationRepository) ListServices(ctx context.Context, id domain.SystemInstanceID) ([]domain.ServiceInstance, error) {
+	services, err := repository.RuntimeInstanceRepository.ListServices(ctx, id)
+	if err != nil || repository.injected || len(services) == 0 {
+		return services, err
+	}
+	repository.injected = true
+	_, err = repository.TransitionService(ctx, reconciliationOperationID, services[0].ID, services[0].StateVersion,
+		domain.ServiceStopping, "", nil, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	return services, nil
 }
 
 func seedReconciliationCatalog(t *testing.T, database *sql.DB, now time.Time) {
@@ -282,11 +353,13 @@ type reconciliationDriver struct {
 	recoverError error
 	discovered   *driver.RecoveredRuntime
 	observation  driver.RuntimeObservation
+	starts       int
 	stops        int
 }
 
 func (*reconciliationDriver) Preflight(context.Context, driver.ResolvedServiceSpec) error { return nil }
-func (*reconciliationDriver) Start(context.Context, driver.StartRequest) (driver.RuntimeIdentity, error) {
+func (value *reconciliationDriver) Start(context.Context, driver.StartRequest) (driver.RuntimeIdentity, error) {
+	value.starts++
 	return driver.RuntimeIdentity{}, errors.New("unexpected start")
 }
 func (value *reconciliationDriver) Stop(context.Context, driver.StopRequest) error {

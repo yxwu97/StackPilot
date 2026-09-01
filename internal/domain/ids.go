@@ -13,6 +13,8 @@ const (
 	portPlanIDPrefix        = "pp_"
 	portLeaseIDPrefix       = "pl_"
 	incidentIDPrefix        = "inc_"
+	revisionIDPrefix        = "rev_"
+	changePlanIDPrefix      = "plan_"
 )
 
 var (
@@ -145,6 +147,34 @@ func ParseIncidentID(value string) (IncidentID, error) {
 
 // String returns the canonical identifier.
 func (id IncidentID) String() string { return string(id) }
+
+// RevisionID identifies one immutable system revision snapshot.
+type RevisionID string
+
+// ParseRevisionID validates and returns a prefixed ULID revision identifier.
+func ParseRevisionID(value string) (RevisionID, error) {
+	if err := validatePrefixedULID("revisionId", value, revisionIDPrefix); err != nil {
+		return "", err
+	}
+	return RevisionID(value), nil
+}
+
+// String returns the canonical identifier.
+func (id RevisionID) String() string { return string(id) }
+
+// ChangePlanID identifies one immutable running-to-workspace comparison.
+type ChangePlanID string
+
+// ParseChangePlanID validates and returns a prefixed ULID change-plan identifier.
+func ParseChangePlanID(value string) (ChangePlanID, error) {
+	if err := validatePrefixedULID("changePlanId", value, changePlanIDPrefix); err != nil {
+		return "", err
+	}
+	return ChangePlanID(value), nil
+}
+
+// String returns the canonical identifier.
+func (id ChangePlanID) String() string { return string(id) }
 
 // EventID is a positive SQLite event sequence used as an SSE cursor.
 type EventID int64

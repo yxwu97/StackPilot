@@ -134,6 +134,17 @@ func TestProcessDriverStartInspectRecoverStop(t *testing.T) {
 	if err != nil || recovered.Observation.State != "running" {
 		t.Fatalf("Recover() = (%#v, %v), want running", recovered, err)
 	}
+	resources, err := driver.ObserveResources(testDriverContext(t), identity)
+	if err != nil || resources.MemoryBytes == 0 || resources.ActiveProcesses < 1 || resources.ObservedAt.Location() != time.UTC {
+		t.Fatalf("ObserveResources() = (%#v, %v), want verified Job counters", resources, err)
+	}
+	legacy := legacyRuntimeIdentity(t, identity)
+	if observation, err := driver.Inspect(testDriverContext(t), legacy); err != nil || observation.State != "running" {
+		t.Fatalf("Inspect(v1) = (%#v, %v), want lifecycle compatibility", observation, err)
+	}
+	if _, err := driver.ObserveResources(testDriverContext(t), legacy); !errors.Is(err, ErrResourceUnsupported) {
+		t.Fatalf("ObserveResources(v1) error = %v, want unsupported", err)
+	}
 	discovered, err := driver.Discover(testDriverContext(t), base.DiscoveryRequest{InstanceDir: instanceDir, ServiceID: "backend"})
 	if err != nil || discovered.Observation.State != "running" || discovered.Identity.PID != identity.PID {
 		t.Fatalf("Discover() = (%#v, %v), want same running process", discovered, err)
@@ -147,6 +158,20 @@ func TestProcessDriverStartInspectRecoverStop(t *testing.T) {
 		t.Fatalf("Stop() error = %v", err)
 	}
 	assertSupervisorExited(t, instanceDir, serveResult)
+}
+
+func legacyRuntimeIdentity(t *testing.T, identity base.RuntimeIdentity) base.RuntimeIdentity {
+	t.Helper()
+	token, err := decodePlatformToken(identity.PlatformToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token.Supervisor.ProtocolVersion = supervisor.MinimumProtocolVersion
+	identity.PlatformToken, err = encodePlatformToken(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return identity
 }
 
 func TestNodeRunnerStartReadyLogsAndStopsProcessTree(t *testing.T) {

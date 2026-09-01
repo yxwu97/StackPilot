@@ -2,6 +2,18 @@ package domain
 
 import "testing"
 
+func TestOperationTypesIncludePlanningWithoutChangingRestart(t *testing.T) {
+	t.Parallel()
+	for _, value := range []OperationType{OperationRestart, OperationChangePlan, OperationVerifiedRestart} {
+		if !value.Valid() {
+			t.Fatalf("operation type %q is not valid", value)
+		}
+	}
+	if OperationType("upgrade").Valid() {
+		t.Fatal("unbounded upgrade operation type unexpectedly validated")
+	}
+}
+
 func TestQueuedOperationCanFailDuringRestartRecovery(t *testing.T) {
 	t.Parallel()
 	if !OperationQueued.CanTransitionTo(OperationFailed) {
@@ -18,6 +30,7 @@ func TestServiceStateTransitions(t *testing.T) {
 		ServiceDegraded:     {ServiceReady, ServiceStopping, ServiceFailed, ServiceUnknown},
 		ServiceStopping:     {ServiceStopped, ServiceFailed, ServiceUnknown},
 		ServiceFailed:       {ServiceStopping, ServiceStopped},
+		ServiceUnknown:      {ServiceFailed, ServiceStopping, ServiceStopped},
 	}
 	for from, targets := range allowed {
 		for _, target := range targets {

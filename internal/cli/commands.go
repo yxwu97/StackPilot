@@ -32,7 +32,7 @@ type runner struct {
 // IsCommand reports whether name belongs to the API-client command surface.
 func IsCommand(name string) bool {
 	switch name {
-	case "open", "workspace", "up", "down", "status", "logs", "wait", "secret":
+	case "open", "workspace", "up", "down", "status", "metrics", "plan", "verified-restart", "logs", "wait", "secret":
 		return true
 	default:
 		return false
@@ -54,6 +54,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return run.lifecycle(args[0], args[1:])
 	case "status":
 		return run.status(args[1:])
+	case "metrics":
+		return run.metrics(args[1:])
+	case "plan":
+		return run.plan(args[1:])
+	case "verified-restart":
+		return run.verifiedRestart(args[1:])
 	case "logs":
 		return run.logs(args[1:])
 	case "wait":

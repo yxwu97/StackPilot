@@ -110,6 +110,21 @@ const (
 	ErrorSecretNotFound                ErrorCode = "SECRET_NOT_FOUND"
 	ErrorSecretInvalid                 ErrorCode = "SECRET_INVALID"
 	ErrorSecretVersionConflict         ErrorCode = "SECRET_VERSION_CONFLICT"
+	ErrorMetricQueryInvalid            ErrorCode = "METRIC_QUERY_INVALID"
+	ErrorMetricSourceUnavailable       ErrorCode = "METRIC_SOURCE_UNAVAILABLE"
+	ErrorMetricSourceUnsupported       ErrorCode = "METRIC_SOURCE_UNSUPPORTED"
+	ErrorRevisionNotFound              ErrorCode = "REVISION_NOT_FOUND"
+	ErrorRevisionSourceUnavailable     ErrorCode = "REVISION_SOURCE_UNAVAILABLE"
+	ErrorRevisionSourceUnsafe          ErrorCode = "REVISION_SOURCE_UNSAFE"
+	ErrorRevisionSourceTooLarge        ErrorCode = "REVISION_SOURCE_TOO_LARGE"
+	ErrorRevisionGitProbeFailed        ErrorCode = "REVISION_GIT_PROBE_FAILED"
+	ErrorChangePlanNotFound            ErrorCode = "CHANGE_PLAN_NOT_FOUND"
+	ErrorChangePlanStale               ErrorCode = "CHANGE_PLAN_STALE"
+	ErrorChangePlanBlocked             ErrorCode = "CHANGE_PLAN_BLOCKED"
+	ErrorChangePlanInvalidState        ErrorCode = "CHANGE_PLAN_INVALID_STATE"
+	ErrorVerificationHealthIncomplete  ErrorCode = "VERIFICATION_HEALTH_INCOMPLETE"
+	ErrorVerificationUnavailable       ErrorCode = "VERIFICATION_UNAVAILABLE"
+	ErrorVerificationFailed            ErrorCode = "VERIFICATION_FAILED"
 	ErrorInternal                      ErrorCode = "INTERNAL_ERROR"
 )
 
@@ -515,6 +530,68 @@ var errorRegistry = map[ErrorCode]errorSpec{
 		HTTPStatus: http.StatusConflict,
 		Message:    "The Secret metadata version conflicts with protected storage.",
 		Retryable:  true,
+	},
+	ErrorMetricQueryInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Message:    "The metric query exceeds the supported time, service, or point limits.",
+	},
+	ErrorMetricSourceUnavailable: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Message:    "The trusted runtime metric source is temporarily unavailable.",
+		Retryable:  true,
+	},
+	ErrorMetricSourceUnsupported: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Message:    "The managed runtime does not support trusted resource metrics.",
+	},
+	ErrorRevisionNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Message:    "The requested system revision was not found.",
+	},
+	ErrorRevisionSourceUnavailable: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Message:    "The system revision cannot be collected from the trusted sources.",
+	},
+	ErrorRevisionSourceUnsafe: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Message:    "A revision source is outside the trusted workspace boundary.",
+	},
+	ErrorRevisionSourceTooLarge: {
+		HTTPStatus: http.StatusRequestEntityTooLarge,
+		Message:    "The revision source exceeds the bounded collection limits.",
+	},
+	ErrorRevisionGitProbeFailed: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Message:    "The bounded read-only Git probe failed.",
+		Retryable:  true,
+	},
+	ErrorChangePlanNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Message:    "The requested change plan was not found.",
+	},
+	ErrorChangePlanStale: {
+		HTTPStatus: http.StatusConflict,
+		Message:    "The workspace changed after the change plan was created.",
+	},
+	ErrorChangePlanBlocked: {
+		HTTPStatus: http.StatusConflict,
+		Message:    "The change plan contains blocking findings.",
+	},
+	ErrorChangePlanInvalidState: {
+		HTTPStatus: http.StatusConflict,
+		Message:    "The change plan is not in a state that permits this action.",
+	},
+	ErrorVerificationHealthIncomplete: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Message:    "The required services do not have sufficient health coverage for verified restart.",
+	},
+	ErrorVerificationUnavailable: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Message:    "Verified restart is unavailable for the current system facts.",
+	},
+	ErrorVerificationFailed: {
+		HTTPStatus: http.StatusConflict,
+		Message:    "The restarted system did not satisfy the stability contract.",
 	},
 	ErrorInternal: {
 		HTTPStatus: http.StatusInternalServerError,

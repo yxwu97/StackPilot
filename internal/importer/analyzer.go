@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"stackpilot/internal/capability"
 	"stackpilot/internal/manifest"
 	"stackpilot/internal/security"
 )
@@ -34,7 +35,7 @@ func NewAnalyzer() (*Analyzer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Analyzer{loader: loader, validator: manifest.NewValidatorWithCapabilities("compose", "compose-build", "liveness", "auto-restart", "go"), now: time.Now}, nil
+	return &Analyzer{loader: loader, validator: manifest.NewValidatorWithCapabilities(capability.PublishedManifestAliases()...), now: time.Now}, nil
 }
 
 func (analyzer *Analyzer) Probe(ctx context.Context, path string) (*ProbeResult, error) {

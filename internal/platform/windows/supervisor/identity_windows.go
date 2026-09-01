@@ -80,7 +80,7 @@ func readIdentity(path string, target any, kind string) error {
 
 // VerifySupervisorIdentity proves that the persisted Supervisor still identifies the live process.
 func VerifySupervisorIdentity(expected SupervisorIdentity) error {
-	if expected.ProtocolVersion != ProtocolVersion {
+	if expected.ProtocolVersion < MinimumProtocolVersion || expected.ProtocolVersion > ProtocolVersion {
 		return fmt.Errorf("%w: persisted Supervisor version %d", errVersionMismatch, expected.ProtocolVersion)
 	}
 	if expected.PID == 0 || !validPipeName(expected.PipeName) {

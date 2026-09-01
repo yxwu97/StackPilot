@@ -1,7 +1,7 @@
 # StackPilot 总体分阶段开发计划
 
-> 状态：执行基线（Phase 2.1 已验收）
-> 日期：2026-08-19
+> 状态：执行基线（Phase 3C RO-01 契约已冻结）
+> 日期：2026-08-31
 > 上游文档：[总体设计方案](./overall-design.md)
 > 实现基线：[详细设计方案](./detailed-design.md)
 > 交互基线：[Web 交互原型](./stackpilot-prototype.html)
@@ -963,3 +963,68 @@ StackPilot 总体路线只有满足以下结果才视为完成，而不是仅完
 bootstrap 校验 migration checksum 并覆盖空库、重复运行和非法配置路径；真实 Start 达到
 API、Worker、Web ready；真实 Stop 释放受管进程与端口并保留命名卷。Docker daemon、镜像拉取
 或依赖注册表不可用时必须报告未执行 Gate，不能以 fixture 冒充实机结果。
+
+## 31. 可观测性、变更计划与验证式重启专项
+
+该专项按 `plan/plan-20260831-01-system-observability-and-change-planning.md` 和 ADR-0010 执行。
+RO-00 已冻结指标口径、Supervisor v2/v1 兼容、健康覆盖等级、修订快照白名单、确定性风险规则和
+验证式重启边界；RO-01 冻结机器契约并新增兼容 migration。关键路径为
+`RO-00 -> RO-01 -> (RO-02 || RO-03) -> RO-05 -> RO-06`，其中资源指标还必须通过 RO-04。
+
+里程碑与工作包映射固定如下：Milestone A 资源观测 = RO-02/03/04，Milestone B 变更计划 =
+RO-02/03/05，Milestone C 验证式重启 = RO-03/05/06。三个外部 capability 分别为
+`phase3.resource-monitoring`、`phase3.change-planning`、`phase3.verified-restart`；RO-00/01
+是共同前置，任一里程碑未通过生产与真实 Gate 时不得公布对应能力。
+
+2026-08-31 从本机控制面数据库只读核对的真实登记基线为 5 个工作区、19 个服务：AgentHub 6、
+AIWS 5、BTC 2、GNMarket 3、PMS 3。19 个服务均未显式配置 liveness，自动重启策略均为 never。
+RO-03 只复用已完成的 Phase 2E 引擎完成真实启用，不重新评审 Phase 2E 历史 Gate；但当前覆盖为
+0 是 Milestone A/B/C 的真实 blocker，fixture 不得替代五系统 Gate。
+
+截至 2026-08-31，RO-02/03/04 已完成，RO-05/06 的生产源码和 fixture 回归也已完成：revision/v1
+只读快照、Supervisor v2 资源观测、严格 Compose stats、有界 sampler、指标明细/小时聚合、显式
+health purpose 与覆盖摘要均有定向测试。000017/000018/000019 分别承载基础观测表、容器明细和
+健康用途迁移。RO-02 隔离只读 Gate 已对五个真实工作区重复采集并通过幂等与敏感信息扫描；当前
+Manifest 为 21 个服务（AgentHub 8 个），与控制库 Version 16 登记快照的 19 个服务（AgentHub
+6 个）形成真实 workspace drift。受控 Windows Job Object 和 Docker 双容器 stats 实机 Gate 已
+通过；临时安装树的跨版本 Supervisor 接管 Gate 也已通过。阻塞 `docker stats` 时 Compose stop
+仍独立完成的确定性并发回归已通过。真实 liveness、实际安装运行身份与生产负载下 sampler
+开/关延迟 Gate 后续已由安装候选证据补齐，`phase3.resource-monitoring` 与
+`phase3.change-planning` 已进入发布注册。`phase3.verified-restart` 仍保持未发布；2026-09-01
+获授权的真实恢复复验中，仅 BTC 完成普通 stop/start、readiness、业务 liveness 与新计划，PMS
+在 RAG readiness 超时，AIWS/AgentHub 在 Compose preflight 超时，GNMarket Web 启动后退出。
+
+隔离 SQLite WAL 容量基准在 19 服务规模下测得：30 秒采样约 54,720 行/日、7.44 MB/日，批量
+写入约 206 ms、一小时查询约 28 ms、小时聚合约 92 ms。由此冻结 30 秒默认采样、24 小时明细、
+30 天小时聚合、每小时清理、1,000 行删除批次，以及 worker/队列/查询硬上限；这些数据不代表
+并发生产负载；真实 Job Object、Docker stats 和确定性 stats/stop 并发隔离已通过，但 capability
+发布前仍须完成生产负载下 sampler 开/关对 start/stop/log/liveness 延迟影响的 Gate。
+
+独立的 migration 后 SQLite WAL contention Gate 已按当前 19 服务规模通过：2,280 条预载指标上并发
+执行指标批次/有界 compaction、liveness 结果写入和 runtime reconciliation 更新，控制写 p95 均低于
+1 ms、最大值低于 87 ms，指标批次 p95 5.501 ms、compaction 最大 13.189 ms。Gate 已反查 WAL、
+预载/最终行数和 reconciliation marker；固定阈值、完整数值和
+隔离范围见 `docs/evidence/ro04-sqlite-contention.json`；该结果不替代真实生产负载 Gate。
+
+RO-04 对当前 Version 16 默认控制库执行了 `mode=ro` + `query_only` 身份观测，没有运行 migration
+或写入指标。非受限 Windows 令牌下，当前 4 个活动系统中的 AIWS `infrastructure` 通过严格持久
+身份返回 6 个容器的 CPU/内存聚合，其余 11 个 Ready process 服务返回
+`PROCESS_IDENTITY_MISMATCH`。`go run` 开发 Gate 不在安装标记的受信控制程序范围内，不能据此断言
+持久身份已损坏；该时点保留的“真实安装升级后复验” blocker 后续已由
+`docs/evidence/ro04-installed-metrics.json` 关闭，全程未退化为 PID 采样。
+独立受控 fixture 已证明协议 v2 Job Object 完整树观测、v1 生命周期兼容/资源 unsupported、marker
+选中候选跨版本 hello，以及 Docker `database + web` 双容器严格身份 stats 可用；阻塞 stats 的
+确定性 fixture 证明同一 Lifecycle 的非破坏 stop 不等待采样结束。测试结束后进程、容器、镜像和卷
+均无遗留，真实安装目录和 marker 未修改。控制面退出顺序已固定为先取消共享 context，再等待
+sampler、workspace import 和 reconciliation，最后关闭 SQLite；端口占用和 active sampler 回归均通过。
+
+RO-05 已在 BTC、PMS、GNMarket、AgentHub 上生成 `ready/high` 的真实计划；AIWS 因停止且无 running
+revision 按契约失败，未修改外部运行状态规避。最新候选已安装并广告 ChangePlan，真实 Web 在 BTC
+上通过 capability enabled、Operation 轮询、revision/风险/差异刷新和恢复验证。RO-06 使用既有
+stop/start 状态机完成计划绑定、停止前 stale/blocked 校验、稳定 liveness 观察、取消/失败现场保留
+及 Incident 证据；五系统真实执行和分阶段控制面崩溃注入仍留在 RO-08，不能用 BTC 单系统或 mock
+替代。机器证据见 `docs/evidence/ro08-real-gates.json`。
+
+首版明确排除日志全文检索、Prometheus/OpenTelemetry 导出、模型风险判断、自动修复、任意命令、
+任意 HTTP/脚本验证、Git 或业务文件写入，以及源码、数据库、镜像和 volume 自动回滚。外部五个
+工作区的 Manifest 修改和真实副作用验收需要单独授权，不能由 StackPilot 仓库 fixture 代替。

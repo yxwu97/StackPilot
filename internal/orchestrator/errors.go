@@ -24,4 +24,16 @@ var (
 	ErrManifestChanged = errors.New("running instance manifest has changed")
 	// ErrSystemAlreadyActive prevents a second start over a non-running active instance.
 	ErrSystemAlreadyActive = errors.New("system instance is already active")
+	// ErrChangePlanStale prevents execution after the candidate workspace revision changed.
+	ErrChangePlanStale = errors.New("change plan candidate revision is stale")
+	// ErrChangePlanBlocked prevents execution of a plan with blocking findings.
+	ErrChangePlanBlocked = errors.New("change plan contains blocking findings")
+	// ErrChangePlanInvalidState prevents execution of a plan that is not ready.
+	ErrChangePlanInvalidState = errors.New("change plan state does not permit verified restart")
+	// ErrVerificationHealthIncomplete identifies insufficient required-service health coverage.
+	ErrVerificationHealthIncomplete = errors.New("required service health coverage is incomplete")
+	// ErrVerificationUnavailable identifies runtime facts that cannot support verified restart.
+	ErrVerificationUnavailable = errors.New("verified restart is unavailable")
+	// ErrVerificationFailed identifies a restarted system that did not remain stable.
+	ErrVerificationFailed = errors.New("verified restart stability contract failed")
 )

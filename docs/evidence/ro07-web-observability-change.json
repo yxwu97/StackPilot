@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "ro07-web-observability-change/v1",
+  "generatedAt": "2026-08-31T15:43:01.4932850Z",
+  "sourceVersion": "0.1.1",
+  "browserTarget": "http://127.0.0.1:32101",
+  "controlPlaneTarget": "http://127.0.0.1:32100",
+  "controlPlaneCapabilities": [
+    "phase3.resource-monitoring"
+  ],
+  "verifiedSystem": {
+    "systemId": "btc",
+    "state": "running",
+    "serviceCount": 2,
+    "metricSeriesAvailable": 2,
+    "changePlanningState": "capability-not-published",
+    "verifiedRestartState": "capability-not-published"
+  },
+  "browserChecks": {
+    "desktop": {
+      "screenshot": "output/playwright/ro07-desktop.png",
+      "sha256": "4fd5b9cfea1b00835dd65cb605c6c31e3d7e1290be4028448898491a44cf26b3"
+    },
+    "mobile": {
+      "viewport": "390x844",
+      "screenshot": "output/playwright/ro07-mobile.png",
+      "sha256": "912de899375f92791e7f50d69b66f1ff6969f03fdf47a407d95b3f4f2514af13",
+      "documentScrollWidth": 390,
+      "documentClientWidth": 390
+    },
+    "consoleErrorsAfterFix": 0,
+    "facts": [
+      "BTC process-job CPU and memory series rendered from the installed metric API.",
+      "Missing healthCoverage from the older running control plane rendered as unavailable and blocked verification.",
+      "ChangePlan and Verified Restart controls remained disabled when capabilities were absent.",
+      "Desktop and mobile layouts had no page-level horizontal overflow or incoherent overlap."
+    ]
+  },
+  "passedCommands": [
+    "go test ./internal/orchestrator -count=1",
+    "go test ./internal/api ./internal/incident ./internal/changeplan ./internal/revision ./internal/metrics -count=1",
+    "go test ./internal/storage -run TestOperationRecoveryFailsInterruptedWorkAndReleasesLock -count=1",
+    "go test ./internal/storage -run TestOperationRecoveryFailsInterruptedWorkAndReleasesLock|TestObservabilitySchema -count=1",
+    "go test ./internal/storage ./internal/driver/process ./internal/platform/windows/supervisor -count=1 (non-sandboxed Windows token)",
+    "go vet ./...",
+    "npm run test:web",
+    "npm run type-check",
+    "npm run build:web",
+    "npm run version:check",
+    ".\\scripts\\check.ps1"
+  ],
+  "sandboxOnlyObservations": [
+    {
+      "command": "go test ./internal/storage -count=1",
+      "reason": "The restricted token failed the Windows DPAPI temporary path ACL check with Access is denied. The identical package passed under the non-sandboxed Windows token."
+    },
+    {
+      "command": "go test ./internal/driver/process ./internal/platform/windows/supervisor -count=1",
+      "reason": "The restricted token failed real Supervisor/Named Pipe fixtures with Access is denied or connection timeout. The identical packages passed under the non-sandboxed Windows token."
+    }
+  ],
+  "notClaimed": [
+    "ChangePlan enabled, blocked, and stale browser flows were not run because the current control plane did not publish phase3.change-planning.",
+    "Verified Restart success and failure browser flows were not run because phase3.verified-restart remains unpublished and real-system Gates are blocked.",
+    "No external workspace, Git state, business database, Secret, Docker state, or real runtime row was modified for this evidence."
+  ]
+}

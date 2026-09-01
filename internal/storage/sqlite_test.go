@@ -50,6 +50,10 @@ func TestOpenConfiguresSQLiteAndMigratesEmptyDatabase(t *testing.T) {
 	assertTableExists(t, database, "port_leases")
 	assertTableExists(t, database, "secret_metadata")
 	assertTableExists(t, database, "service_instance_secret_versions")
+	assertTableExists(t, database, "system_revision_snapshots")
+	assertTableExists(t, database, "change_plans")
+	assertTableExists(t, database, "runtime_metric_samples")
+	assertTableExists(t, database, "runtime_metric_hourly_aggregates")
 	if err := CheckWritable(context.Background(), database); err != nil {
 		t.Fatalf("CheckWritable() error = %v", err)
 	}
@@ -116,8 +120,8 @@ func TestMigrationsAreIdempotentAcrossRepeatedOpen(t *testing.T) {
 	if err := second.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 16 {
-		t.Fatalf("migration count = %d, want 16", count)
+	if count != 19 {
+		t.Fatalf("migration count = %d, want 19", count)
 	}
 }
 

@@ -54,6 +54,29 @@ func TestInstallUpgradeAndUninstallPreserveData(t *testing.T) {
 	}
 }
 
+func TestUpgradeRepairsRegistrationWhenCandidateIsUnchanged(t *testing.T) {
+	root := t.TempDir()
+	installDir, dataDir := filepath.Join(root, "installed"), filepath.Join(root, "durable-data")
+	source := copyTestExecutable(t, filepath.Join(root, "candidate.exe"), false)
+	fake := useFakeScheduler(t)
+	options := InstallOptions{
+		InstallDir: installDir, DataDir: dataDir, TaskName: "StackPilot-Test",
+		SourceExecutable: source, Version: "v1", Port: 32991,
+	}
+	if _, err := Install(context.Background(), options); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	fake.registered = nil
+
+	status, err := Upgrade(context.Background(), installDir, source, "v1")
+	if err != nil || status.State != "stopped" || len(fake.registered) != 1 {
+		t.Fatalf("Upgrade() = (%+v, %v), registrations = %d", status, err, len(fake.registered))
+	}
+	if fake.registered[0].ExecutablePath != status.ExecutablePath {
+		t.Fatalf("registered executable = %q, want %q", fake.registered[0].ExecutablePath, status.ExecutablePath)
+	}
+}
+
 func TestInstallRejectsOverlappingDataRoot(t *testing.T) {
 	root := t.TempDir()
 	source := copyTestExecutable(t, filepath.Join(root, "candidate.exe"), false)

@@ -1,7 +1,7 @@
 # StackPilot 总体设计方案
 
-> 状态：初稿
-> 日期：2026-08-17
+> 状态：Phase 3C 设计基线
+> 日期：2026-08-31
 > 技术栈：Go + Vue 3 + SQLite + REST/SSE + Docker Compose
 
 ## 1. 背景
@@ -1036,3 +1036,31 @@ Windows 是首个稳定发布目标。Phase 0 对 Linux/macOS 只做公共核心
 1. PMS、AIWS、BTC 的 readiness 接口是否足以替代现有固定等待。
 2. AIWS Keycloak Configure 是否在重复执行、部分成功和版本升级场景下保持幂等。
 3. Linux 与 macOS 的优先级及对应业务系统实际运行范围。
+
+## 28. 可观测性、修订与验证式重启专项
+
+本专项按 ADR-0010 和 `plan/plan-20260831-01-system-observability-and-change-planning.md`
+执行，形成资源观测、只读变更规划和验证式重启三条独立受控能力：
+`phase3.resource-monitoring`、`phase3.change-planning` 和
+`phase3.verified-restart`。三项 capability 只有在各自生产实现和真实 Gate 通过后才公布；
+此前新入口缺席或返回 `FEATURE_NOT_ENABLED`。
+
+资源观测以 Windows Supervisor 持有的 Job Object 和已登记 Compose 身份为来源，不以根 PID
+冒充进程树。默认 30 秒采样，明细保留 24 小时、小时聚合保留 30 天；采样失败、旧协议或
+Docker 不可用不得阻塞启停、日志、健康检查和恢复。高频指标通过有界 REST 窗口查询，不进入
+领域事件 SSE。
+
+System Revision 将运行时事实与工作区候选事实保存为不同的不可变规范快照。工作区收集只允许
+严格 Manifest、受信 Runner、固定只读 Git 命令、已登记 Compose 身份和文件白名单摘要；不得
+读取 `.env`、递归扫描任意文件、接受调用方命令或产生构建、拉取、启动、写文件等副作用。
+ChangePlan 只比较两个快照并按版本化确定性规则分级，不执行变更。
+
+Verified Restart 在任何生命周期副作用前重新收集候选修订并核对计划摘要、阻断项、能力和活动
+Operation，然后复用现有逆拓扑停止、全新端口规划、启动和 readiness 路径。成功要求所有必需
+daemon 在 30 秒稳定窗口内保持 Ready 且显式 liveness 成功，必需 oneshot 达到 Completed。
+首版不提供 Git、源码、数据库、镜像或 volume 自动回滚，也不新增任意脚本或通用 HTTP 验证入口。
+
+2026-08-31 的只读登记基线为 5 个工作区、19 个服务，显式 liveness 覆盖为 0，自动重启均未
+启用。因此 Phase 2E 引擎完成不等于真实健康覆盖完成；RO-03 是变更规划和验证式重启的硬 Gate。
+完整口径、安全边界、容量默认值和协议兼容决策见
+[ADR-0010](./adr/0010-observability-revisions-change-plans-and-verified-restart.md)。

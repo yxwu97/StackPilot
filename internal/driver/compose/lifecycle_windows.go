@@ -3,11 +3,18 @@
 package compose
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"stackpilot/internal/security"
@@ -143,6 +150,121 @@ func (lifecycle *Lifecycle) Inspect(ctx context.Context, identity ProjectIdentit
 		return ProjectObservation{}, err
 	}
 	return lifecycle.inspectWithDocker(ctx, docker, identity)
+}
+
+const maxStatsOutput = 1 << 20
+
+type dockerStatsRow struct {
+	ID     string `json:"ID"`
+	CPU    string `json:"CPUPerc"`
+	Memory string `json:"MemUsage"`
+}
+
+// ObserveResources performs one bounded stats read for exact verified container IDs.
+func (lifecycle *Lifecycle) ObserveResources(ctx context.Context, encodedIdentity string) (ResourceObservation, error) {
+	identity, err := DecodeProjectIdentity(encodedIdentity)
+	if err != nil {
+		return ResourceObservation{}, ErrProjectIdentityMismatch
+	}
+	docker, _, err := lifecycle.validateIdentity(identity)
+	if err != nil {
+		return ResourceObservation{}, err
+	}
+	project, err := lifecycle.inspectWithDocker(ctx, docker, identity)
+	if err != nil {
+		return ResourceObservation{}, err
+	}
+	return lifecycle.observeContainers(ctx, docker, identity, project)
+}
+
+func (lifecycle *Lifecycle) observeContainers(ctx context.Context, docker string, identity ProjectIdentity, project ProjectObservation) (ResourceObservation, error) {
+	containerServices := make(map[string]string, len(project.Containers))
+	ids := make([]string, 0, len(project.Containers))
+	for _, container := range project.Containers {
+		containerServices[container.ID] = container.Service
+		ids = append(ids, container.ID)
+	}
+	sort.Strings(ids)
+	arguments := []string{"stats", "--no-stream", "--no-trunc", "--format", "{{json .}}"}
+	arguments = append(arguments, ids...)
+	output, err := lifecycle.run(ctx, docker, arguments, filepath.Dir(identity.ComposeFile), lifecycle.environment)
+	if err != nil || len(output.Stdout) > maxStatsOutput || len(output.Stderr) > maxStatsOutput {
+		return ResourceObservation{}, ErrResourceStatsUnavailable
+	}
+	return decodeResourceStats(output.Stdout, containerServices, time.Now().UTC())
+}
+
+func decodeResourceStats(value []byte, services map[string]string, observedAt time.Time) (ResourceObservation, error) {
+	result := ResourceObservation{ObservedAt: observedAt, Containers: make([]ContainerResourceObservation, 0, len(services))}
+	seen := make(map[string]struct{}, len(services))
+	scanner := bufio.NewScanner(strings.NewReader(string(value)))
+	scanner.Buffer(make([]byte, 64*1024), maxStatsOutput)
+	for scanner.Scan() {
+		var row dockerStatsRow
+		if err := json.Unmarshal(scanner.Bytes(), &row); err != nil {
+			return ResourceObservation{}, ErrResourceStatsUnavailable
+		}
+		service, exists := services[row.ID]
+		if !exists {
+			return ResourceObservation{}, ErrProjectIdentityMismatch
+		}
+		cpu, err := normalizedDockerCPU(row.CPU)
+		if err != nil {
+			return ResourceObservation{}, err
+		}
+		memory, err := parseDockerMemory(row.Memory)
+		if err != nil {
+			return ResourceObservation{}, err
+		}
+		seen[row.ID] = struct{}{}
+		result.CPUPercent, result.MemoryBytes = result.CPUPercent+cpu, result.MemoryBytes+memory
+		result.Containers = append(result.Containers, ContainerResourceObservation{ID: row.ID, ComposeService: service, CPUPercent: cpu, MemoryBytes: memory})
+	}
+	if scanner.Err() != nil || len(seen) != len(services) || result.CPUPercent > 100.000001 {
+		return ResourceObservation{}, ErrResourceStatsUnavailable
+	}
+	sort.Slice(result.Containers, func(i, j int) bool { return result.Containers[i].ID < result.Containers[j].ID })
+	return result, nil
+}
+
+func normalizedDockerCPU(value string) (float64, error) {
+	parsed, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(value), "%"), 64)
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 {
+		return 0, ErrResourceStatsUnavailable
+	}
+	return parsed / float64(runtime.NumCPU()), nil
+}
+
+func parseDockerMemory(value string) (int64, error) {
+	usage, _, found := strings.Cut(value, "/")
+	if !found {
+		return 0, ErrResourceStatsUnavailable
+	}
+	fields := strings.Fields(strings.TrimSpace(usage))
+	if len(fields) == 1 {
+		return parseDockerBytes(fields[0])
+	}
+	return 0, ErrResourceStatsUnavailable
+}
+
+func parseDockerBytes(value string) (int64, error) {
+	index := strings.IndexFunc(value, func(character rune) bool { return (character < '0' || character > '9') && character != '.' })
+	if index <= 0 {
+		return 0, ErrResourceStatsUnavailable
+	}
+	number, err := strconv.ParseFloat(value[:index], 64)
+	multiplier, ok := dockerUnitMultiplier(strings.ToLower(value[index:]))
+	bytes := number * multiplier
+	if err != nil || !ok || math.IsNaN(bytes) || math.IsInf(bytes, 0) || bytes < 0 || bytes > math.MaxInt64 {
+		return 0, ErrResourceStatsUnavailable
+	}
+	return int64(math.Round(bytes)), nil
+}
+
+func dockerUnitMultiplier(unit string) (float64, bool) {
+	values := map[string]float64{"b": 1, "kb": 1e3, "mb": 1e6, "gb": 1e9, "tb": 1e12, "kib": 1 << 10, "mib": 1 << 20, "gib": 1 << 30, "tib": 1 << 40}
+	value, ok := values[unit]
+	return value, ok
 }
 
 func (lifecycle *Lifecycle) inspectWithDocker(ctx context.Context, docker string, identity ProjectIdentity) (ProjectObservation, error) {

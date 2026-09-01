@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "ro04-sqlite-contention/v1",
+  "generatedAt": "2026-08-31T08:08:35.0010592Z",
+  "scope": "isolated-sqlite-wal",
+  "platform": "windows/amd64",
+  "goVersion": "go1.26.6",
+  "databaseMode": "temporary-wal",
+  "serviceCount": 19,
+  "preloadedMetricRows": 2280,
+  "gateStatus": "passed",
+  "limits": {
+    "controlP95Millis": 250,
+    "controlMaximumMillis": 1000,
+    "backgroundMaximumMillis": 2000
+  },
+  "baseline": {
+    "healthWrite": {
+      "count": 40,
+      "p50Millis": 0,
+      "p95Millis": 0.5427,
+      "maximumMillis": 6.6936
+    },
+    "runtimeReconcile": {
+      "count": 40,
+      "p50Millis": 0,
+      "p95Millis": 0,
+      "maximumMillis": 0.5144
+    }
+  },
+  "concurrent": {
+    "healthWrite": {
+      "count": 60,
+      "p50Millis": 0,
+      "p95Millis": 0.6837,
+      "maximumMillis": 86.956
+    },
+    "runtimeReconcile": {
+      "count": 60,
+      "p50Millis": 0,
+      "p95Millis": 0,
+      "maximumMillis": 41.5041
+    },
+    "metricBatch": {
+      "count": 60,
+      "p50Millis": 0.5151,
+      "p95Millis": 5.5009,
+      "maximumMillis": 26.334
+    },
+    "compaction": {
+      "count": 4,
+      "p50Millis": 1.624,
+      "p95Millis": 13.1891,
+      "maximumMillis": 13.1891
+    }
+  }
+}

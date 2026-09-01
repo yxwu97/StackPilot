@@ -1,7 +1,7 @@
 # StackPilot 详细设计方案
 
-> 状态：Phase 2.1 实现基线
-> 日期：2026-08-19
+> 状态：Phase 3C 设计基线
+> 日期：2026-08-31
 > 上游文档：[总体设计方案](./overall-design.md)
 > 交互基线：[Web 交互原型](./stackpilot-prototype.html)
 > 首发范围：Phase 0、Phase 1（Windows-first）；兼顾 Phase 2 扩展边界
@@ -680,6 +680,7 @@ Supervisor 生命周期规则：
 - 所有服务停止后，Supervisor 响应 `shutdown-if-empty` 并退出。
 - Supervisor 异常退出时 Job Object 的 kill-on-close 终止服务树；Server 恢复时将实例标记 failed 并记录 `SUPERVISOR_EXITED`。
 - 协议版本不兼容时不得接管或终止现有进程；实例置 unknown，要求用户显式处理。
+- 仓库专用 `start-stackpilot.bat` 是显式冷启动例外：它先优雅停止已登记控制面，再按精确映像名清理所有残留 `stackpilot.exe`（包括 Supervisor），确认旧进程全部退出后才启动新控制面。该入口会触发 Supervisor 的 kill-on-close 并终止相应业务进程树；需要跨控制面重启保持业务进程时必须使用公共 `service start/upgrade` 生命周期。
 
 这里的两个异常场景没有冲突：Server 崩溃时 Job 句柄仍由 Supervisor 持有；只有 Supervisor 自身退出时才触发 `KILL_ON_JOB_CLOSE`。若省略 Supervisor 而由 Server 直接持有带 kill-on-close 的最后一个 Job 句柄，“关闭后再启动”之间的空档会终止业务进程，不能满足 P1-06。除非技术验证证明可用更简单的可靠句柄交接，否则不采用该简化。
 
@@ -1629,3 +1630,92 @@ Compose 文件没有本地 build，因此不要求 `phase2.compose-build`。验�
 校验、Runner 解析、Compose config、bootstrap 空库与重复运行、API/Worker/Web readiness、
 完整 Stop 后端口/进程释放以及命名卷保留。任何绕过 `WORKSPACE_SCRIPT_DANGEROUS`、新增 shell
 Runner、执行脚本或普通停止删除 volume 的方案均不属于该专项。
+
+## 32. 可观测性、System Revision、ChangePlan 与 Verified Restart
+
+### 32.1 能力与交付 Gate
+
+三个外部能力固定为 `phase3.resource-monitoring`、`phase3.change-planning` 和
+`phase3.verified-restart`，由单一 Go 注册源供 `/version`、Manifest 内部门控、API 装配和测试
+使用。Web 仅消费 `/version`。任一能力在生产实现和真实 Gate 通过前不得广告；对应路由应缺席
+或统一返回 `FEATURE_NOT_ENABLED`。Milestone A 依赖 RO-02/03/04，B 依赖 RO-02/03/05，C
+依赖 RO-03/05/06；RO-00/01 是共同前置。
+
+### 32.2 RuntimeMetricSample
+
+指标样本记录来源、可用状态、UTC 观测时间、采样间隔和有类型的数值字段；缺失值使用 null 和稳定
+安全原因，禁止以 0 表示不可用。Process 指标只能由 Supervisor 对 Job Object 做全树统计；CPU
+百分比由连续累计内核/用户时间差值按墙钟时间和逻辑处理器数归一化。Compose 指标只能按持久化
+project 身份、StackPilot label 和精确 container ID 聚合，禁止按名称模糊匹配。
+
+Supervisor protocol v2 增加封闭的 `observe-service` 请求；v1 的 inspect/stop/recover 协议和
+身份校验保持兼容，指标状态为 unsupported，不得为了采样替换仍持有服务的旧 Supervisor。默认
+采样 30 秒，可配置范围 10 秒至 5 分钟；明细 24 小时、小时聚合 30 天、每小时小批量清理。
+全局最多 4 个 worker、队列 128、单服务仅一个在途请求、超时 5 秒。查询最多 100 个服务、31 天、
+2,000 点。采样和清理不得阻塞生命周期、健康、日志或 reconciliation。
+
+### 32.3 Health Coverage
+
+健康覆盖投影固定为 business、container、process-only 和 unavailable，并携带最新安全结果。
+RO-03 复用已完成的 Phase 2E liveness 引擎，不重新评审历史 Gate，只在五个真实系统上完成显式
+liveness 启用和验证。readiness 不得推导为 liveness，进程身份检查只能形成 process-only。
+任何必需 daemon 为 process-only 或 unavailable 时，Verified Restart 必须阻断；必需 oneshot
+只有达到 Completed 才满足覆盖。
+
+`health_results` 必须显式保存 `readiness|liveness` purpose，覆盖摘要只读取最新 liveness 结果。
+旧 schema 无法区分的历史结果统一按 readiness 迁移，禁止根据检查类型或时间顺序倒推为 liveness。
+系统 status API 将覆盖投影为按 service instance 关联的安全列表，仅包含 readiness/liveness 类型、
+覆盖等级、是否满足验证以及最近检查的成功、错误码和 UTC 时间；不得返回健康响应正文。新 Web
+连接尚未升级的控制面时必须把缺失字段视为 unavailable，不得乐观推断。
+
+### 32.4 SystemRevisionSnapshot
+
+running 与 workspace 快照使用版本化规范 JSON 和 SHA-256，内容不可变，相同规范输入可复用。
+running 快照只取启动时 Manifest/ResolvedSpec、运行身份和 Secret metadata version，不从当前工作
+区回填。workspace 快照绑定登记后的 canonical root，只允许严格 Manifest 和 Runner 解析、固定的
+Git 只读命令、登记 Compose 身份以及依赖/迁移文件白名单摘要。
+
+Git 探针必须固定 `git.exe`、argv、canonical 工作目录、3 秒超时、每流 256 KiB 上限和最小环境，
+不经 shell。文件收集最多 256 个、单文件 1 MiB、总计 32 MiB，并再次验证 regular file 与真实根
+边界。快照及 DTO 禁止包含 Secret、普通环境值、完整 argv、原始 Git/Docker 输出和绝对路径。
+
+### 32.5 ChangePlan
+
+`change-plan` 是持久化异步 Operation，步骤固定为 collect-running、collect-workspace、compare、
+classify-risk、persist-plan。它没有 PortLease、Secret 解析、进程、构建、拉取、oneshot 或工作区
+写入副作用。计划只比较两个完整快照，以 `change-risk/v1` 生成稳定排序的类型化差异，风险为
+info、low、medium、high 或 blocked，聚合风险取最高项；未知事实不得降级为低风险。
+
+收集过程中源发生变化时 Operation 失败且不得保存混合计划。计划终态成功后不可变；只有 from、
+to 和规则摘要完全相同时才能复用，同时仍保留 Operation 审计和幂等语义。
+
+### 32.6 Verified Restart
+
+`verified-restart` 是独立持久化 Operation。输入仅含工作区/系统归属、ChangePlan ID 以及既有幂等
+和认证元数据。在停止前重新收集 workspace revision，要求与计划 toDigest 完全一致，并重查阻断项、
+capability 和活动 Operation；不一致返回 `CHANGE_PLAN_STALE`，有阻断项返回
+`CHANGE_PLAN_BLOCKED`。
+
+校验通过后组合现有逆拓扑 stop 与 fresh start/port-plan/readiness，不复制状态机。旧实例停止使用
+旧 ResolvedSpec，新实例启动使用新候选。所有必需 daemon 必须在 30 秒窗口保持 Ready 且符合
+liveness 成功，必需 oneshot 必须 Completed。失败只保留真实运行状态和有界 Operation/Incident
+证据，不执行 Git、源码、数据库、镜像或 volume 自动回滚。
+
+验证失败 Incident 使用现有 JSON Context 表达，不新增 verification 表。Context 可选携带
+Operation、ChangePlan、候选 Revision 和新 System Instance ID，Evidence 引用失败 Operation event
+及各服务最近的持久 liveness result；引用必须有界，不复制命令、环境、路径、响应正文或原始日志。
+
+### 32.7 存储、API 与恢复
+
+Migration 000017 扩展 Operation 类型约束，并增加修订快照、变更计划、服务指标明细和小时聚合；
+000018 增加 Compose 容器指标明细；000019 为健康明细与小时聚合增加 readiness/liveness purpose。
+容器明细必须通过外键和数据库约束绑定到可用 Compose 父样本，
+不得挂接到 process-job 或 unavailable 样本。只有 RO-06 证明 Operation、health_result 和 Incident 无法无损表达验证事实时才增加专用
+verification 表。JSON 字段必须具备 json_valid、schema version、字节上限和归属/摘要唯一约束；
+指标使用有类型列。
+
+错误码族固定为 `METRIC_*`、`REVISION_*`、`CHANGE_PLAN_*` 和 `VERIFICATION_*`。REST 列表和
+时间窗口必须有硬上限；新 Operation 继续以数据库事件为事实来源支持 SSE 恢复。控制面重启时，
+planning 只可从完整持久快照恢复或失败；verified restart 必须沿用既有 stop/start ownership 和
+reconciliation，不得猜测已发生的生命周期步骤。完整决策见
+[ADR-0010](./adr/0010-observability-revisions-change-plans-and-verified-restart.md)。

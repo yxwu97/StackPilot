@@ -16,6 +16,8 @@ var (
 	ErrPlatformUnsupported = errors.New("process Driver platform is unsupported")
 	// ErrSupervisorUnavailable indicates a private Supervisor communication failure.
 	ErrSupervisorUnavailable = errors.New("process Supervisor is unavailable")
+	// ErrResourceUnsupported identifies a lifecycle-compatible Supervisor without resource protocol support.
+	ErrResourceUnsupported = errors.New("process resource observation is unsupported")
 	// ErrAlreadyRunning indicates that the service is already owned by the Supervisor.
 	ErrAlreadyRunning = errors.New("process service is already running")
 	// ErrRuntimeNotFound indicates that the Supervisor does not own the requested service.

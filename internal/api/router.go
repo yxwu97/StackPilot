@@ -53,6 +53,7 @@ type Config struct {
 	Audit            security.AuditStore
 	Secrets          security.SecretProvider
 	Incidents        incidentStore
+	MetricQueries    metricQueryService
 }
 
 // NewHandler constructs the API router and embedded Web console handler.
@@ -101,6 +102,7 @@ func apiV1Router(config Config) http.Handler {
 }
 
 func registerBusinessRoutes(router chi.Router, config Config) {
+	registerPhase3ContractRoutes(router, config)
 	if config.Audit != nil {
 		registerAuditRoutes(router, config.Audit)
 	}

@@ -165,3 +165,40 @@ Migration `000016_workspace_imports.sql` adds four bounded control-plane tables:
 - `workspace_sources` records existing-manifest, BAT import, structured-edit, or relink provenance and an optional relative BAT entry/digest.
 
 Import and edit publication is recoverable across the file/SQLite boundary: the Operation is queued first, a same-directory file is flushed and atomically published, then the workspace snapshot/source projection is committed. Relink uses the same path-scoped Operation and atomically updates only the catalog path/snapshot after revalidating the same System ID; old workspace files are never deleted. A restarted worker reconciles the fixed manifest and catalog before completing the remaining steps.
+
+## Version 17
+
+`000017_observability_change_planning.sql` extends the closed `operations.type` constraint with
+`change-plan` and `verified-restart` while preserving all historical Operation rows and their step,
+event, and port-lease foreign keys. The migration uses the migration runner's explicit
+`stackpilot:foreign-keys-off` directive on one dedicated connection, performs the parent-table rebuild
+inside one transaction, runs `foreign_key_check` before commit, and restores foreign-key enforcement
+before returning the connection to the pool. Ordinary migrations continue with foreign keys enabled.
+
+The migration adds four focused tables:
+
+| Table | Purpose | Key constraints |
+| --- | --- | --- |
+| `system_revision_snapshots` | Immutable running or workspace canonical revision JSON | `rev_<ULID>` ID; unique SHA-256; running snapshots require a system instance; valid object JSON no larger than 4 MiB |
+| `change_plans` | Immutable deterministic comparison of two revision snapshots | `plan_<ULID>` ID; unique creator Operation; `change-risk/v1`-style bounded version; blocked state/risk/count consistency; valid result JSON no larger than 4 MiB |
+| `runtime_metric_samples` | Bounded process-job or Compose detail samples | Unique service/source/time; 10 seconds to 5 minutes interval; explicit available/unavailable/unsupported state; typed nonnegative counters; CPU bounded to 0-100 |
+| `runtime_metric_hourly_aggregates` | Hourly count, CPU, and memory aggregates | Primary key by service/source/hour; available/sample count invariants; paired min/max/total fields |
+
+Metric absence is never stored as a zero measurement: unavailable and unsupported samples require a
+safe reason code and null numeric fields. The new tables contain no command, environment, Secret value,
+absolute workspace path, raw Git/Docker output, or source file content. No verification table is created;
+RO-06 must first prove that Operation, health, and Incident evidence cannot represent the required result.
+
+## Version 18
+
+`000018_container_metric_details.sql` adds `runtime_container_metric_samples` for bounded
+per-container Compose observations. Rows are children of one service-level metric sample and
+are deleted with that sample. A database trigger rejects details whose parent is not an
+`available` `compose` sample, so process metrics cannot be mislabeled as container facts.
+
+## Version 19
+
+`000019_health_result_purpose.sql` adds the closed `readiness|liveness` purpose to
+`health_results` and to the hourly aggregate key. Historical rows and aggregates are
+conservatively classified as readiness because their original schema cannot prove which
+recurring checks were liveness; no historical liveness evidence is inferred.

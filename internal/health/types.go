@@ -28,6 +28,14 @@ const (
 // ErrorCode is a stable readiness failure category.
 type ErrorCode string
 
+// Purpose distinguishes startup readiness evidence from recurring liveness evidence.
+type Purpose string
+
+const (
+	PurposeReadiness Purpose = "readiness"
+	PurposeLiveness  Purpose = "liveness"
+)
+
 const (
 	CodeProcessExited           ErrorCode = "PROCESS_EXITED"
 	CodeProcessIdentityMismatch ErrorCode = "PROCESS_IDENTITY_MISMATCH"
@@ -43,6 +51,7 @@ const (
 // Result is one bounded, persistence-safe health-check result.
 type Result struct {
 	ID         int64
+	Purpose    Purpose
 	Kind       Kind
 	CheckedAt  time.Time
 	Duration   time.Duration

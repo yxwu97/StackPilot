@@ -167,6 +167,13 @@ func (service *SingleService) reconcileSystem(ctx context.Context, repository re
 	for index := range runtimes {
 		updated, err := service.reconcileRuntime(ctx, system, runtimes[index], spec)
 		if err != nil {
+			superseded, inspectErr := service.reconciliationSuperseded(ctx, runtimes[index], err)
+			if inspectErr != nil {
+				return inspectErr
+			}
+			if superseded {
+				return nil
+			}
 			return err
 		}
 		states = append(states, updated.State)
@@ -179,6 +186,21 @@ func (service *SingleService) reconcileSystem(ctx context.Context, repository re
 		return fmt.Errorf("record reconciliation completion: %w", err)
 	}
 	return nil
+}
+
+func (service *SingleService) reconciliationSuperseded(ctx context.Context, stale domain.ServiceInstance, cause error) (bool, error) {
+	classifier, ok := service.config.Runtime.(runtimeStateConflictClassifier)
+	if !ok || !classifier.IsRuntimeStateConflict(cause) {
+		return false, nil
+	}
+	current, found, err := service.config.Runtime.GetService(ctx, stale.ID)
+	if err != nil {
+		return false, fmt.Errorf("reload concurrently changed service %s: %w", stale.ServiceID, err)
+	}
+	if !found {
+		return true, nil
+	}
+	return current.StateVersion != stale.StateVersion, nil
 }
 
 func (service *SingleService) reconcileRuntime(ctx context.Context, system domain.SystemInstance, runtime domain.ServiceInstance, spec *ResolvedSystemSpec) (domain.ServiceInstance, error) {

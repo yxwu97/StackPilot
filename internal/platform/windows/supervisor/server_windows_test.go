@@ -30,6 +30,15 @@ func TestSupervisorRuntimeFixture(t *testing.T) {
 		if err := Serve(context.Background(), Config{InstanceDir: arguments[1]}); err != nil {
 			os.Exit(31)
 		}
+	case "connect":
+		identity, err := ReadSupervisorIdentity(filepath.Join(arguments[1], "supervisor.json"))
+		if err != nil {
+			os.Exit(35)
+		}
+		client, err := Connect(context.Background(), identity)
+		if err != nil || client.Exchange(context.Background(), MessageShutdownIfEmpty, struct{}{}, &struct{}{}) != nil {
+			os.Exit(36)
+		}
 	case "launch":
 		executable, err := os.Executable()
 		if err != nil {
@@ -44,6 +53,78 @@ func TestSupervisorRuntimeFixture(t *testing.T) {
 		os.Exit(34)
 	}
 	os.Exit(0)
+}
+
+func TestInstalledCandidateTakesOverExistingSupervisor(t *testing.T) {
+	root := t.TempDir()
+	current := installedFixtureExecutable(t, root, "current", false)
+	candidate := installedFixtureExecutable(t, root, "candidate", true)
+	candidateDigest, err := executableSHA256(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeUpgradeMarker(t, root, candidate, candidateDigest)
+	instanceDir := newSupervisorTestInstance(t)
+	server := exec.Command(current, "-test.run=TestSupervisorRuntimeFixture", "--",
+		supervisorFixtureArgument, "serve", instanceDir)
+	if err := server.Start(); err != nil {
+		t.Fatalf("start installed Supervisor fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		if server.Process != nil {
+			_ = server.Process.Kill()
+			_, _ = server.Process.Wait()
+		}
+	})
+	waitForSupervisorIdentity(t, instanceDir)
+	client := exec.Command(candidate, "-test.run=TestSupervisorRuntimeFixture", "--",
+		supervisorFixtureArgument, "connect", instanceDir)
+	if output, err := client.CombinedOutput(); err != nil {
+		t.Fatalf("trusted installed candidate handshake failed: %v (%s)", err, output)
+	}
+	if err := server.Wait(); err != nil {
+		t.Fatalf("installed Supervisor fixture exit error: %v", err)
+	}
+	server.Process = nil
+}
+
+func installedFixtureExecutable(t *testing.T, root, label string, appendOverlay bool) string {
+	t.Helper()
+	source, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if appendOverlay {
+		payload = append(payload, []byte(label)...)
+	}
+	digest := digestBytes(payload)
+	target := filepath.Join(root, "versions", digest, "stackpilot.exe")
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, payload, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return target
+}
+
+func waitForSupervisorIdentity(t *testing.T, instanceDir string) SupervisorIdentity {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	path := filepath.Join(instanceDir, "supervisor.json")
+	for time.Now().Before(deadline) {
+		identity, err := ReadSupervisorIdentity(path)
+		if err == nil {
+			return identity
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("installed Supervisor fixture did not publish identity")
+	return SupervisorIdentity{}
 }
 
 func TestSupervisorProtocolLifecycleAndCleanShutdown(t *testing.T) {
@@ -63,6 +144,11 @@ func TestSupervisorProtocolLifecycleAndCleanShutdown(t *testing.T) {
 	exchange(t, client, MessageInspectService, ServiceRequest{ServiceID: request.ServiceID}, &inspected)
 	if inspected.State != "running" || inspected.Identity == nil || inspected.Identity.PID != started.Identity.PID {
 		t.Fatalf("inspect response = %#v, want running started identity", inspected)
+	}
+	var resources ResourceObservation
+	exchange(t, client, MessageObserveService, ServiceRequest{ServiceID: request.ServiceID}, &resources)
+	if resources.Identity == nil || resources.Identity.PID != started.Identity.PID || resources.ActiveProcesses < 2 || resources.MemoryBytes == 0 || resources.ObservedAt.Location() != time.UTC {
+		t.Fatalf("resource response = %#v, want full managed Job counters", resources)
 	}
 	var stopped ServiceStatus
 	exchange(t, client, MessageStopService, StopServiceRequest{ServiceID: request.ServiceID}, &stopped)

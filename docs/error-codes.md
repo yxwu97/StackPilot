@@ -18,6 +18,21 @@ The OpenAPI extension `x-stackpilot-error-codes` in `api/openapi.yaml` is the ma
 | `RESOURCE_NOT_FOUND` | 404 | No | None | The requested resource was not found. |
 | `METHOD_NOT_ALLOWED` | 405 | No | None | The request method is not allowed for this resource. |
 | `FEATURE_NOT_ENABLED` | 422 | No | `feature` | The requested feature is not enabled. |
+| `METRIC_QUERY_INVALID` | 400 | No | None | The metric query exceeds the supported time, service, or point limits. |
+| `METRIC_SOURCE_UNAVAILABLE` | 503 | Yes | None | The trusted runtime metric source is temporarily unavailable. |
+| `METRIC_SOURCE_UNSUPPORTED` | 422 | No | None | The managed runtime does not support trusted resource metrics. |
+| `REVISION_NOT_FOUND` | 404 | No | None | The requested system revision was not found. |
+| `REVISION_SOURCE_UNAVAILABLE` | 422 | No | None | The system revision cannot be collected from the trusted sources. |
+| `REVISION_SOURCE_UNSAFE` | 422 | No | None | A revision source is outside the trusted workspace boundary. |
+| `REVISION_SOURCE_TOO_LARGE` | 413 | No | None | The revision source exceeds the bounded collection limits. |
+| `REVISION_GIT_PROBE_FAILED` | 503 | Yes | None | The bounded read-only Git probe failed. |
+| `CHANGE_PLAN_NOT_FOUND` | 404 | No | None | The requested change plan was not found. |
+| `CHANGE_PLAN_STALE` | 409 | No | None | The workspace changed after the change plan was created. |
+| `CHANGE_PLAN_BLOCKED` | 409 | No | None | The change plan contains blocking findings. |
+| `CHANGE_PLAN_INVALID_STATE` | 409 | No | None | The change plan is not in a state that permits this action. |
+| `VERIFICATION_HEALTH_INCOMPLETE` | 422 | No | None | The required services do not have sufficient health coverage for verified restart. |
+| `VERIFICATION_UNAVAILABLE` | 422 | No | None | Verified restart is unavailable for the current system facts. |
+| `VERIFICATION_FAILED` | 409 | No | None | The restarted system did not satisfy the stability contract. |
 | `COMPOSE_CONFIG_INVALID` | 422 | No | None | The Docker Compose configuration is invalid. |
 | `COMPOSE_BUILD_CONFIG_INVALID` | 422 | No | None | The Docker Compose build configuration is invalid. |
 | `COMPOSE_BUILD_FAILED` | 422 | Yes | None | The Docker Compose image build failed. |

@@ -134,3 +134,51 @@ func (service *SingleService) reportOperationIncident(ctx context.Context, opera
 		service.config.Logger.Error("report Operation incident", "operation_id", operation.ID.String(), "error", err)
 	}
 }
+
+func (service *SingleService) reportVerificationIncident(ctx context.Context, operation Operation, planID domain.ChangePlanID, code string) {
+	if service.config.Incidents == nil || service.config.ChangePlans == nil {
+		return
+	}
+	eventID, found, err := service.config.Operations.LatestEvent(ctx, operation.ID)
+	if err != nil || !found {
+		service.config.Logger.Error("resolve verification incident evidence", "operation_id", operation.ID.String(), "error", err)
+		return
+	}
+	plan, err := service.config.ChangePlans.Get(ctx, planID)
+	if err != nil {
+		service.config.Logger.Error("resolve verification incident plan", "operation_id", operation.ID.String(), "error", err)
+		return
+	}
+	at := time.Now().UTC()
+	systemID, evidence := service.verificationIncidentEvidence(ctx, operation.WorkspaceID, eventID)
+	value := incident.Context{
+		SchemaVersion: "1", WorkspaceID: operation.WorkspaceID, OperationID: operation.ID,
+		SystemInstanceID: systemID, ChangePlanID: planID, RevisionID: plan.To.ID,
+		Kind: incident.KindVerification, TriggerCode: code,
+		WindowStart: at.Add(-incident.DefaultBeforeWindow), WindowEnd: at.Add(incident.DefaultAfterWindow),
+		Dependencies: map[string]domain.ServiceState{}, Ports: map[string]int{},
+		Evidence: evidence, Logs: []incident.LogLine{},
+	}
+	if _, _, err := service.config.Incidents.Report(ctx, incident.ReportInput{Context: value, Severity: incident.SeverityCritical, OccurredAt: at, TriggerEventID: eventID}); err != nil {
+		service.config.Logger.Error("report verification incident", "operation_id", operation.ID.String(), "error", err)
+	}
+}
+
+func (service *SingleService) verificationIncidentEvidence(ctx context.Context, workspaceID domain.WorkspaceID, eventID domain.EventID) (domain.SystemInstanceID, []incident.EvidenceRef) {
+	evidence := []incident.EvidenceRef{{Type: "event", EventID: eventID}}
+	system, found, err := service.config.Runtime.GetActive(ctx, workspaceID)
+	if err != nil || !found {
+		return "", evidence
+	}
+	runtimes, err := service.config.Runtime.ListServices(ctx, system.ID)
+	if err != nil {
+		return system.ID, evidence
+	}
+	for _, runtime := range runtimes {
+		latest, latestErr := service.latestLiveness(ctx, runtime.ID)
+		if latestErr == nil && latest != nil && latest.ID > 0 {
+			evidence = append(evidence, incident.EvidenceRef{Type: "health", HealthResultID: latest.ID, ServiceInstanceID: runtime.ID})
+		}
+	}
+	return system.ID, evidence
+}

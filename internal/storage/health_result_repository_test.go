@@ -20,7 +20,7 @@ func TestHealthResultRepositoryPersistsAndListsNewestFirst(t *testing.T) {
 	base := time.Date(2026, 8, 18, 13, 0, 0, 0, time.UTC)
 	results := []health.Result{
 		{Kind: health.KindTCP, CheckedAt: base, Duration: 12 * time.Millisecond, ErrorCode: health.CodeTCPRefused, Summary: "refused"},
-		{Kind: health.KindHTTP, CheckedAt: base.Add(time.Second), Duration: 3 * time.Millisecond, Success: true, Summary: "HTTP status 200"},
+		{Purpose: health.PurposeLiveness, Kind: health.KindHTTP, CheckedAt: base.Add(time.Second), Duration: 3 * time.Millisecond, Success: true, Summary: "HTTP status 200"},
 		{Kind: health.KindCompose, CheckedAt: base.Add(2 * time.Second), Duration: 5 * time.Millisecond, ErrorCode: health.CodeContainerUnhealthy, Summary: "unhealthy"},
 	}
 	for _, result := range results {
@@ -37,6 +37,10 @@ func TestHealthResultRepositoryPersistsAndListsNewestFirst(t *testing.T) {
 	}
 	if stored[2].Duration != 12*time.Millisecond || stored[0].CheckedAt.Location() != time.UTC {
 		t.Fatalf("stored timing = %#v", stored)
+	}
+	liveness, err := repository.ListRecentByPurpose(context.Background(), serviceInstanceID, health.PurposeLiveness, 10)
+	if err != nil || len(liveness) != 1 || liveness[0].Kind != health.KindHTTP || !liveness[0].Success {
+		t.Fatalf("ListRecentByPurpose() = %#v, %v", liveness, err)
 	}
 }
 

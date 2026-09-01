@@ -1,0 +1,87 @@
+{
+  "schemaVersion": "ro02-real-workspace/v1",
+  "generatedAt": "2026-08-31T08:50:25.7802651Z",
+  "platform": "windows/amd64",
+  "goVersion": "go1.26.6",
+  "systems": [
+    {
+      "systemId": "agenthub",
+      "revisionDigest": "2b0988772db53d5e248577442954646de703cf84b75f6eee7e3aab031a3ffafe",
+      "manifestDigest": "0b38ea4d5c03774f295ff617fd5d7ca8f5e88408e95947af9f3c5b273e8e5968",
+      "gitStatus": "not-repository",
+      "gitDirty": false,
+      "serviceCount": 8,
+      "fileCount": 5,
+      "runnerAvailable": 7,
+      "runnerUnavailable": 0,
+      "coverage": {
+        "business": 5,
+        "container": 1,
+        "unavailable": 2
+      },
+      "deterministic": true
+    },
+    {
+      "systemId": "aiws",
+      "revisionDigest": "01eef101d415273e7c53a0c5d103870400c955880672e7b54c8a51bdb75c8f8d",
+      "manifestDigest": "f577fedd2cb75fc315e478802586065680368c8652ec372529ff0e12e9eca42b",
+      "gitStatus": "available",
+      "gitDirty": true,
+      "serviceCount": 5,
+      "fileCount": 6,
+      "runnerAvailable": 4,
+      "runnerUnavailable": 0,
+      "coverage": {
+        "business": 3,
+        "container": 1,
+        "unavailable": 1
+      },
+      "deterministic": true
+    },
+    {
+      "systemId": "btc",
+      "revisionDigest": "536e272d58fd1f00d4fa030c2e94407b936f69d34b4a5934bc9783b2797a806b",
+      "manifestDigest": "c2c88c6882fb9a429b6f6446cf41b8ecef498af8e1f205696404c39859d472b6",
+      "gitStatus": "available",
+      "gitDirty": true,
+      "serviceCount": 2,
+      "fileCount": 3,
+      "runnerAvailable": 2,
+      "runnerUnavailable": 0,
+      "coverage": {
+        "business": 2
+      },
+      "deterministic": true
+    },
+    {
+      "systemId": "gnmarket",
+      "revisionDigest": "6a78ed8405f073de0d71eec02b3cce02be4dbae4a5cdd3e1e4d1cfc06ef5aa73",
+      "manifestDigest": "51066cd9bc22d668d7ab87aa5a5834d7614d9144791fd54afa232cf82771cc17",
+      "gitStatus": "available",
+      "gitDirty": true,
+      "serviceCount": 3,
+      "fileCount": 3,
+      "runnerAvailable": 3,
+      "runnerUnavailable": 0,
+      "coverage": {
+        "business": 3
+      },
+      "deterministic": true
+    },
+    {
+      "systemId": "pms",
+      "revisionDigest": "b80adadc16ec92a15825df390e117a01e882a7fead16274a5f94d2e2914a5e49",
+      "manifestDigest": "3d2fecd6d851197ba8f163ca6216475261725cf5b5a3ace609aa28a6b6856ec0",
+      "gitStatus": "available",
+      "gitDirty": true,
+      "serviceCount": 3,
+      "fileCount": 4,
+      "runnerAvailable": 3,
+      "runnerUnavailable": 0,
+      "coverage": {
+        "business": 3
+      },
+      "deterministic": true
+    }
+  ]
+}

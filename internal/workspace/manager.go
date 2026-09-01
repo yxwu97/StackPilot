@@ -31,6 +31,7 @@ type Repository interface {
 	Get(context.Context, domain.WorkspaceID) (*Record, error)
 	List(context.Context) ([]Record, error)
 	Definition(context.Context, domain.WorkspaceID) (*Definition, error)
+	ManifestByDigest(context.Context, string) (ManifestView, error)
 	Delete(context.Context, domain.WorkspaceID) error
 	Relink(context.Context, Relink) (*Record, error)
 }
@@ -106,6 +107,11 @@ func (manager *Manager) List(ctx context.Context) ([]Record, error) {
 // Definition returns the last valid immutable definition for a workspace.
 func (manager *Manager) Definition(ctx context.Context, id domain.WorkspaceID) (*Definition, error) {
 	return manager.repository.Definition(ctx, id)
+}
+
+// ManifestByDigest returns one immutable historical manifest snapshot.
+func (manager *Manager) ManifestByDigest(ctx context.Context, digest string) (ManifestView, error) {
+	return manager.repository.ManifestByDigest(ctx, digest)
 }
 
 func (manager *Manager) CurrentSnapshot(ctx context.Context, root string) (Snapshot, error) {

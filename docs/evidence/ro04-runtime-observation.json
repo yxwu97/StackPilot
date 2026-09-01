@@ -1,0 +1,207 @@
+{
+    "schemaVersion":  "ro04-runtime-observation/v1",
+    "generatedAt":  "2026-08-31T09:55:16.147497Z",
+    "platform":  "windows/amd64",
+    "goVersion":  "go1.26.6",
+    "clientTrust":  "development-build-untrusted-by-installed-supervisor",
+    "databaseVersion":  19,
+    "gateStatus":  "blocked",
+    "blockers":  [
+                     "PROCESS_IDENTITY_MISMATCH",
+                     "PROCESS_REAL_OBSERVATION_REQUIRED",
+                     "TRUSTED_INSTALL_RUNTIME_GATE_REQUIRED"
+                 ],
+    "activeSystems":  5,
+    "services":  [
+                     {
+                         "systemId":  "agenthub",
+                         "serviceId":  "analysis-runner",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:19.0565599Z"
+                     },
+                     {
+                         "systemId":  "agenthub",
+                         "serviceId":  "api",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:19.0576552Z"
+                     },
+                     {
+                         "systemId":  "agenthub",
+                         "serviceId":  "bootstrap",
+                         "driver":  "process",
+                         "runtimeState":  "completed",
+                         "metricStatus":  "skipped",
+                         "reasonCode":  "RUNTIME_NOT_ELIGIBLE"
+                     },
+                     {
+                         "systemId":  "agenthub",
+                         "serviceId":  "infrastructure",
+                         "driver":  "compose",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "available",
+                         "observedAt":  "2026-08-31T09:55:21.0752119Z",
+                         "cpuPercent":  0.27312499999999995,
+                         "memoryBytes":  420397188,
+                         "containerCount":  5
+                     },
+                     {
+                         "systemId":  "agenthub",
+                         "serviceId":  "report-worker",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:21.0790686Z"
+                     },
+                     {
+                         "systemId":  "agenthub",
+                         "serviceId":  "web",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:21.0801239Z"
+                     },
+                     {
+                         "systemId":  "agenthub",
+                         "serviceId":  "web-install",
+                         "driver":  "process",
+                         "runtimeState":  "completed",
+                         "metricStatus":  "skipped",
+                         "reasonCode":  "RUNTIME_NOT_ELIGIBLE"
+                     },
+                     {
+                         "systemId":  "agenthub",
+                         "serviceId":  "worker",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:21.0811791Z"
+                     },
+                     {
+                         "systemId":  "aiws",
+                         "serviceId":  "agent-runtime",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:16.1667357Z"
+                     },
+                     {
+                         "systemId":  "aiws",
+                         "serviceId":  "infrastructure",
+                         "driver":  "compose",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "available",
+                         "observedAt":  "2026-08-31T09:55:19.0507403Z",
+                         "cpuPercent":  0.065625,
+                         "memoryBytes":  2129144054,
+                         "containerCount":  6
+                     },
+                     {
+                         "systemId":  "aiws",
+                         "serviceId":  "keycloak-configure",
+                         "driver":  "process",
+                         "runtimeState":  "completed",
+                         "metricStatus":  "skipped",
+                         "reasonCode":  "RUNTIME_NOT_ELIGIBLE"
+                     },
+                     {
+                         "systemId":  "aiws",
+                         "serviceId":  "server",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:19.0529734Z"
+                     },
+                     {
+                         "systemId":  "aiws",
+                         "serviceId":  "web",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:19.0543321Z"
+                     },
+                     {
+                         "systemId":  "btc",
+                         "serviceId":  "backend",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:16.153977Z"
+                     },
+                     {
+                         "systemId":  "btc",
+                         "serviceId":  "web",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:16.1566951Z"
+                     },
+                     {
+                         "systemId":  "gnmarket",
+                         "serviceId":  "frontend",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:16.15966Z"
+                     },
+                     {
+                         "systemId":  "gnmarket",
+                         "serviceId":  "job",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:16.1618374Z"
+                     },
+                     {
+                         "systemId":  "gnmarket",
+                         "serviceId":  "web",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:16.1634429Z"
+                     },
+                     {
+                         "systemId":  "pms",
+                         "serviceId":  "backend",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:21.0827435Z"
+                     },
+                     {
+                         "systemId":  "pms",
+                         "serviceId":  "rag",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:21.0840166Z"
+                     },
+                     {
+                         "systemId":  "pms",
+                         "serviceId":  "web",
+                         "driver":  "process",
+                         "runtimeState":  "ready",
+                         "metricStatus":  "unavailable",
+                         "reasonCode":  "PROCESS_IDENTITY_MISMATCH",
+                         "observedAt":  "2026-08-31T09:55:21.0850664Z"
+                     }
+                 ]
+}

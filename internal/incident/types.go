@@ -22,6 +22,7 @@ const (
 	KindRestartLimit     Kind = "restart-limit"
 	KindIdentityMismatch Kind = "identity-mismatch"
 	KindKnownLogError    Kind = "known-log-error"
+	KindVerification     Kind = "verification-failure"
 )
 
 // Severity is the operator impact of an incident.
@@ -67,6 +68,9 @@ type Context struct {
 	SystemInstanceID  domain.SystemInstanceID        `json:"systemInstanceId,omitempty"`
 	ServiceInstanceID domain.ServiceInstanceID       `json:"serviceInstanceId,omitempty"`
 	ServiceID         domain.ServiceID               `json:"serviceId,omitempty"`
+	OperationID       domain.OperationID             `json:"operationId,omitempty"`
+	ChangePlanID      domain.ChangePlanID            `json:"changePlanId,omitempty"`
+	RevisionID        domain.RevisionID              `json:"revisionId,omitempty"`
 	Kind              Kind                           `json:"kind"`
 	TriggerCode       string                         `json:"triggerCode"`
 	WindowStart       time.Time                      `json:"windowStart"`
@@ -146,7 +150,7 @@ func (record Record) Kind() Kind { return record.Context.Kind }
 
 func (value Kind) valid() bool {
 	switch value {
-	case KindPortConflict, KindProcessExit, KindReadinessTimeout, KindLivenessFailure, KindRestartLimit, KindIdentityMismatch, KindKnownLogError:
+	case KindPortConflict, KindProcessExit, KindReadinessTimeout, KindLivenessFailure, KindRestartLimit, KindIdentityMismatch, KindKnownLogError, KindVerification:
 		return true
 	default:
 		return false

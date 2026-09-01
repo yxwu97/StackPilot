@@ -49,13 +49,17 @@ func (repository *HealthResultRepository) Record(ctx context.Context, id domain.
 
 // RecordWithID persists one result and returns its monotonic durable cursor.
 func (repository *HealthResultRepository) RecordWithID(ctx context.Context, id domain.ServiceInstanceID, result health.Result) (int64, error) {
+	if result.Purpose == "" {
+		result.Purpose = health.PurposeReadiness
+	}
 	if err := validateHealthResult(id, result); err != nil {
 		return 0, err
 	}
 	inserted, err := repository.database.ExecContext(ctx, `INSERT INTO health_results
-        (service_instance_id, kind, success, duration_ms, error_code, summary, checked_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`, id.String(), string(result.Kind), boolInteger(result.Success),
-		result.Duration.Milliseconds(), nullableText(string(result.ErrorCode)), result.Summary, formatDatabaseTime(result.CheckedAt))
+		(service_instance_id, kind, success, duration_ms, error_code, summary, checked_at, purpose)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, id.String(), string(result.Kind), boolInteger(result.Success),
+		result.Duration.Milliseconds(), nullableText(string(result.ErrorCode)), result.Summary, formatDatabaseTime(result.CheckedAt),
+		string(result.Purpose))
 	if err != nil {
 		return 0, fmt.Errorf("insert health result: %w", err)
 	}
@@ -71,11 +75,26 @@ func (repository *HealthResultRepository) ListRecent(ctx context.Context, id dom
 	if _, err := domain.ParseServiceInstanceID(id.String()); err != nil || limit < 1 || limit > maximumHealthResults {
 		return nil, fmt.Errorf("invalid health result query")
 	}
-	rows, err := repository.database.QueryContext(ctx, `SELECT id, kind, success, duration_ms,
-        error_code, summary, checked_at FROM health_results WHERE service_instance_id = ?
-        ORDER BY checked_at DESC, id DESC LIMIT ?`, id.String(), limit)
+	rows, err := repository.database.QueryContext(ctx, `SELECT id, purpose, kind, success, duration_ms,
+		error_code, summary, checked_at FROM health_results WHERE service_instance_id = ?
+		ORDER BY checked_at DESC, id DESC LIMIT ?`, id.String(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list health results: %w", err)
+	}
+	defer rows.Close()
+	return scanHealthResults(rows)
+}
+
+// ListRecentByPurpose returns newest-first readiness or liveness evidence.
+func (repository *HealthResultRepository) ListRecentByPurpose(ctx context.Context, id domain.ServiceInstanceID, purpose health.Purpose, limit int) ([]health.Result, error) {
+	if _, err := domain.ParseServiceInstanceID(id.String()); err != nil || !validHealthPurpose(purpose) || limit < 1 || limit > maximumHealthResults {
+		return nil, fmt.Errorf("invalid health result query")
+	}
+	rows, err := repository.database.QueryContext(ctx, `SELECT id, purpose, kind, success, duration_ms,
+		error_code, summary, checked_at FROM health_results WHERE service_instance_id = ? AND purpose = ?
+		ORDER BY checked_at DESC, id DESC LIMIT ?`, id.String(), string(purpose), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list health results by purpose: %w", err)
 	}
 	defer rows.Close()
 	return scanHealthResults(rows)
@@ -105,17 +124,17 @@ func (repository *HealthResultRepository) Compact(ctx context.Context, now time.
 
 func aggregateHealthBatch(ctx context.Context, connection *sql.Conn, cutoff string, policy HealthRetentionPolicy) error {
 	_, err := connection.ExecContext(ctx, `WITH ranked AS (
-        SELECT id, service_instance_id, kind, success, duration_ms, checked_at,
+		SELECT id, service_instance_id, purpose, kind, success, duration_ms, checked_at,
             ROW_NUMBER() OVER (PARTITION BY service_instance_id ORDER BY checked_at DESC, id DESC) AS rank
         FROM health_results
     ), candidates AS (
         SELECT * FROM ranked WHERE checked_at < ? AND rank > ? ORDER BY checked_at, id LIMIT ?
     )
     INSERT INTO health_hourly_aggregates
-        (service_instance_id,kind,bucket_start,check_count,success_count,duration_total_ms,duration_max_ms)
-    SELECT service_instance_id,kind,substr(checked_at,1,13) || ':00:00Z',COUNT(*),SUM(success),SUM(duration_ms),MAX(duration_ms)
-    FROM candidates WHERE 1 GROUP BY service_instance_id,kind,substr(checked_at,1,13)
-    ON CONFLICT(service_instance_id,kind,bucket_start) DO UPDATE SET
+		(service_instance_id,purpose,kind,bucket_start,check_count,success_count,duration_total_ms,duration_max_ms)
+	SELECT service_instance_id,purpose,kind,substr(checked_at,1,13) || ':00:00Z',COUNT(*),SUM(success),SUM(duration_ms),MAX(duration_ms)
+	FROM candidates WHERE 1 GROUP BY service_instance_id,purpose,kind,substr(checked_at,1,13)
+	ON CONFLICT(service_instance_id,purpose,kind,bucket_start) DO UPDATE SET
         check_count=check_count+excluded.check_count,
         success_count=success_count+excluded.success_count,
         duration_total_ms=duration_total_ms+excluded.duration_total_ms,
@@ -143,14 +162,14 @@ func scanHealthResults(rows *sql.Rows) ([]health.Result, error) {
 	results := make([]health.Result, 0)
 	for rows.Next() {
 		var result health.Result
-		var kind, checkedAt string
+		var purpose, kind, checkedAt string
 		var code sql.NullString
 		var success int
 		var durationMillis int64
-		if err := rows.Scan(&result.ID, &kind, &success, &durationMillis, &code, &result.Summary, &checkedAt); err != nil {
+		if err := rows.Scan(&result.ID, &purpose, &kind, &success, &durationMillis, &code, &result.Summary, &checkedAt); err != nil {
 			return nil, fmt.Errorf("scan health result: %w", err)
 		}
-		result.Kind, result.Success, result.ErrorCode = health.Kind(kind), success == 1, health.ErrorCode(code.String)
+		result.Purpose, result.Kind, result.Success, result.ErrorCode = health.Purpose(purpose), health.Kind(kind), success == 1, health.ErrorCode(code.String)
 		result.Duration = durationFromMilliseconds(durationMillis)
 		var err error
 		if result.CheckedAt, err = parseDatabaseTime(checkedAt); err != nil {
@@ -171,6 +190,9 @@ func validateHealthResult(id domain.ServiceInstanceID, result health.Result) err
 	if result.Kind != health.KindProcess && result.Kind != health.KindTCP && result.Kind != health.KindHTTP && result.Kind != health.KindCompose {
 		return fmt.Errorf("invalid health result kind")
 	}
+	if !validHealthPurpose(result.Purpose) {
+		return fmt.Errorf("invalid health result purpose")
+	}
 	if result.Duration < 0 || result.CheckedAt.IsZero() || len(result.Summary) > 2048 || !utf8.ValidString(result.Summary) {
 		return fmt.Errorf("invalid health result metadata")
 	}
@@ -178,6 +200,10 @@ func validateHealthResult(id domain.ServiceInstanceID, result health.Result) err
 		return fmt.Errorf("invalid health result outcome")
 	}
 	return nil
+}
+
+func validHealthPurpose(value health.Purpose) bool {
+	return value == health.PurposeReadiness || value == health.PurposeLiveness
 }
 
 func validHealthErrorCode(code health.ErrorCode, success bool) bool {

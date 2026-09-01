@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"stackpilot/internal/changeplan"
 	"stackpilot/internal/domain"
 	"stackpilot/internal/driver"
 	"stackpilot/internal/driver/compose"
@@ -17,11 +18,18 @@ import (
 	"stackpilot/internal/logs"
 	"stackpilot/internal/manifest"
 	"stackpilot/internal/ports"
+	"stackpilot/internal/revision"
 	"stackpilot/internal/security"
 	"stackpilot/internal/workspace"
 )
 
 const workerFinalizationTimeout = 10 * time.Second
+
+const (
+	defaultVerificationStableWindow = 30 * time.Second
+	defaultVerificationTimeout      = 60 * time.Second
+	defaultVerificationPollInterval = time.Second
+)
 
 var errUserCancellation = errors.New("operation cancellation requested by user")
 
@@ -86,6 +94,10 @@ type reconciliationRuntimeRepository interface {
 	MarkReconciled(context.Context, domain.SystemInstanceID, time.Time) error
 }
 
+type runtimeStateConflictClassifier interface {
+	IsRuntimeStateConflict(error) bool
+}
+
 type secretVersionStore interface {
 	RecordServiceSecretVersions(context.Context, domain.ServiceInstanceID, []security.ServiceSecretVersion) error
 	ListServiceSecretVersions(context.Context, domain.ServiceInstanceID) ([]security.ServiceSecretVersion, error)
@@ -103,6 +115,10 @@ type restartAttemptStore interface {
 
 type healthCompactor interface {
 	CompactDefault(context.Context, time.Time) (int64, error)
+}
+
+type healthResultReader interface {
+	ListRecentByPurpose(context.Context, domain.ServiceInstanceID, health.Purpose, int) ([]health.Result, error)
 }
 
 type incidentReporter interface {
@@ -127,31 +143,37 @@ type livenessRegistration struct {
 
 // SingleServiceConfig wires the Phase 1B vertical slice without exposing adapters to HTTP.
 type SingleServiceConfig struct {
-	Context          context.Context
-	Operations       *Manager
-	Workspaces       *workspace.Manager
-	Runner           runnerResolver
-	Driver           driver.Driver
-	Compose          composeLifecycle
-	Overrides        *compose.OverrideGenerator
-	Runtime          runtimeRepository
-	Readiness        readinessWaiter
-	Liveness         livenessMonitor
-	StartLogs        LogStartFunc
-	ResumeLogs       LogStartFunc
-	LogCheckpoints   logCheckpointStore
-	PortPlanner      *ports.Planner
-	PortLeases       portLeaseManager
-	ResolvedSpecs    resolvedSpecStore
-	Secrets          security.SecretProvider
-	SecretVersions   secretVersionStore
-	RestartAttempts  restartAttemptStore
-	HealthRetention  healthCompactor
-	Incidents        incidentReporter
-	IncidentAnalyzer incidentAnalyzer
-	IncidentLogs     incidentLogReader
-	DataDir          string
-	Logger           *slog.Logger
+	Context                  context.Context
+	Operations               *Manager
+	Workspaces               *workspace.Manager
+	Runner                   runnerResolver
+	Driver                   driver.Driver
+	Compose                  composeLifecycle
+	Overrides                *compose.OverrideGenerator
+	Runtime                  runtimeRepository
+	Readiness                readinessWaiter
+	Liveness                 livenessMonitor
+	StartLogs                LogStartFunc
+	ResumeLogs               LogStartFunc
+	LogCheckpoints           logCheckpointStore
+	PortPlanner              *ports.Planner
+	PortLeases               portLeaseManager
+	ResolvedSpecs            resolvedSpecStore
+	Secrets                  security.SecretProvider
+	SecretVersions           secretVersionStore
+	RestartAttempts          restartAttemptStore
+	HealthRetention          healthCompactor
+	HealthResults            healthResultReader
+	Incidents                incidentReporter
+	IncidentAnalyzer         incidentAnalyzer
+	IncidentLogs             incidentLogReader
+	Revisions                *revision.Service
+	ChangePlans              *changeplan.Service
+	VerificationStableWindow time.Duration
+	VerificationTimeout      time.Duration
+	VerificationPollInterval time.Duration
+	DataDir                  string
+	Logger                   *slog.Logger
 }
 
 // StartSingleServiceInput is the trusted application command built by the API boundary.
@@ -201,6 +223,7 @@ type RuntimeStatus struct {
 	Services          []domain.ServiceInstance
 	Resolved          *ResolvedSystemSpec
 	ComposeContainers map[domain.ServiceInstanceID][]ComposeContainerStatus
+	HealthCoverage    map[domain.ServiceInstanceID]health.CoverageSummary
 }
 
 // ComposeContainerStatus is a safe live container projection for the status API.
@@ -233,6 +256,18 @@ func NewSingleService(config SingleServiceConfig) (*SingleService, error) {
 	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()
+	}
+	if config.VerificationStableWindow <= 0 {
+		config.VerificationStableWindow = defaultVerificationStableWindow
+	}
+	if config.VerificationTimeout <= 0 {
+		config.VerificationTimeout = defaultVerificationTimeout
+	}
+	if config.VerificationPollInterval <= 0 {
+		config.VerificationPollInterval = defaultVerificationPollInterval
+	}
+	if config.VerificationTimeout < config.VerificationStableWindow {
+		return nil, fmt.Errorf("verification timeout must cover the stable window")
 	}
 	return &SingleService{
 		config: config, workers: make(map[domain.OperationID]context.CancelCauseFunc),
@@ -421,14 +456,57 @@ func (service *SingleService) Status(ctx context.Context, workspaceID domain.Wor
 		return RuntimeStatus{}, err
 	}
 	status := RuntimeStatus{System: system, Services: services}
-	if len(services) > 1 && service.config.ResolvedSpecs != nil {
+	if service.config.ResolvedSpecs != nil && len(services) > 1 {
 		status.Resolved, err = service.loadRuntimeSpec(ctx, system.ResolvedSpecDigest)
 		if err != nil {
 			return RuntimeStatus{}, err
 		}
 	}
 	status.ComposeContainers = service.observeComposeContainers(ctx, services)
+	status.HealthCoverage, err = service.healthCoverage(ctx, services, status.Resolved)
+	if err != nil {
+		return RuntimeStatus{}, err
+	}
 	return status, nil
+}
+
+func (service *SingleService) healthCoverage(ctx context.Context, services []domain.ServiceInstance, resolved *ResolvedSystemSpec) (map[domain.ServiceInstanceID]health.CoverageSummary, error) {
+	result := make(map[domain.ServiceInstanceID]health.CoverageSummary, len(services))
+	if resolved == nil {
+		for _, runtime := range services {
+			result[runtime.ID] = health.CoverageSummary{Coverage: domain.HealthCoverageUnavailable}
+		}
+		return result, nil
+	}
+	for _, runtime := range services {
+		spec, exists := resolved.Services[runtime.ServiceID.String()]
+		if !exists {
+			return nil, ErrInvalidInput
+		}
+		latest, err := service.latestLiveness(ctx, runtime.ID)
+		if err != nil {
+			return nil, err
+		}
+		result[runtime.ID] = health.SummarizeCoverage(health.CoverageInput{
+			Driver: runtime.Driver, Mode: runtime.ProcessMode, Required: spec.Required, State: runtime.State,
+			ReadinessKind: spec.Readiness.Kind, Liveness: spec.Liveness, Latest: latest,
+		})
+	}
+	return result, nil
+}
+
+func (service *SingleService) latestLiveness(ctx context.Context, id domain.ServiceInstanceID) (*health.Result, error) {
+	if service.config.HealthResults == nil {
+		return nil, nil
+	}
+	results, err := service.config.HealthResults.ListRecentByPurpose(ctx, id, health.PurposeLiveness, 1)
+	if err != nil {
+		return nil, fmt.Errorf("load latest liveness result: %w", err)
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
 }
 
 func (service *SingleService) observeComposeContainers(ctx context.Context, services []domain.ServiceInstance) map[domain.ServiceInstanceID][]ComposeContainerStatus {

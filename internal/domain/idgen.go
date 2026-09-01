@@ -72,6 +72,24 @@ func NewIncidentID(now time.Time, entropy io.Reader) (IncidentID, error) {
 	return ParseIncidentID(incidentIDPrefix + encoded)
 }
 
+// NewRevisionID creates a time-sortable immutable revision identifier.
+func NewRevisionID(now time.Time, entropy io.Reader) (RevisionID, error) {
+	encoded, err := generateULID(now, entropy)
+	if err != nil {
+		return "", err
+	}
+	return ParseRevisionID(revisionIDPrefix + encoded)
+}
+
+// NewChangePlanID creates a time-sortable immutable change-plan identifier.
+func NewChangePlanID(now time.Time, entropy io.Reader) (ChangePlanID, error) {
+	encoded, err := generateULID(now, entropy)
+	if err != nil {
+		return "", err
+	}
+	return ParseChangePlanID(changePlanIDPrefix + encoded)
+}
+
 func generateULID(now time.Time, entropy io.Reader) (string, error) {
 	if entropy == nil {
 		return "", fmt.Errorf("ULID entropy source is required")

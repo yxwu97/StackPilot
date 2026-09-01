@@ -47,6 +47,7 @@ func TestAllRegisteredMessagePayloads(t *testing.T) {
 		{MessageHello, HelloRequest{ClientPID: 42}},
 		{MessageStartService, validStartRequest()},
 		{MessageInspectService, ServiceRequest{ServiceID: "backend"}},
+		{MessageObserveService, ServiceRequest{ServiceID: "backend"}},
 		{MessageStopService, StopServiceRequest{ServiceID: "backend", GracefulTimeoutMillis: 15_000}},
 		{MessageShutdownIfEmpty, struct{}{}},
 	}
@@ -61,6 +62,22 @@ func TestAllRegisteredMessagePayloads(t *testing.T) {
 				t.Fatalf("DecodePayload() error = %v", err)
 			}
 		})
+	}
+}
+
+func TestVersionOneRetainsLifecycleButRejectsResourceMessage(t *testing.T) {
+	lifecycle := Request{Version: MinimumProtocolVersion, RequestID: "r1", Type: MessageInspectService, Payload: json.RawMessage(`{"serviceId":"backend"}`)}
+	if _, err := lifecycle.DecodePayload(); err != nil {
+		t.Fatalf("v1 lifecycle request error = %v", err)
+	}
+	resources := lifecycle
+	resources.Type = MessageObserveService
+	if _, err := resources.DecodePayload(); !errors.Is(err, errVersionMismatch) {
+		t.Fatalf("v1 resource request error = %v", err)
+	}
+	response, err := successResponseForVersion(MinimumProtocolVersion, "r1", HelloResponse{SupervisorPID: 1})
+	if err != nil || response.Version != MinimumProtocolVersion {
+		t.Fatalf("v1 response = %#v, %v", response, err)
 	}
 }
 

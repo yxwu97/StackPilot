@@ -411,6 +411,38 @@ type jobAccounting struct {
 	TotalTerminatedProcesses  uint32
 }
 
+type jobMemoryUsage struct {
+	JobMemory         uint64
+	PeakJobMemoryUsed uint64
+}
+
+const jobObjectMemoryUsageInformation int32 = 28
+
+func (service *managedService) resources() (ResourceObservation, error) {
+	status, err := service.status()
+	if err != nil {
+		return ResourceObservation{}, err
+	}
+	accounting := jobAccounting{}
+	if err := windows.QueryInformationJobObject(service.job, windows.JobObjectBasicAccountingInformation,
+		uintptr(unsafe.Pointer(&accounting)), uint32(unsafe.Sizeof(accounting)), nil); err != nil {
+		return ResourceObservation{}, fmt.Errorf("query service Job accounting: %w", err)
+	}
+	memory := jobMemoryUsage{}
+	if err := windows.QueryInformationJobObject(service.job, jobObjectMemoryUsageInformation,
+		uintptr(unsafe.Pointer(&memory)), uint32(unsafe.Sizeof(memory)), nil); err != nil {
+		return ResourceObservation{}, fmt.Errorf("query service Job memory: %w", err)
+	}
+	cpu100ns := accounting.TotalUserTime + accounting.TotalKernelTime
+	if cpu100ns < 0 {
+		return ResourceObservation{}, fmt.Errorf("service Job CPU counter is invalid")
+	}
+	return ResourceObservation{
+		ServiceID: service.serviceID, ObservedAt: time.Now().UTC(), CPUTotalMillis: cpu100ns / 10_000,
+		MemoryBytes: memory.JobMemory, ActiveProcesses: accounting.ActiveProcesses, Identity: status.Identity,
+	}, nil
+}
+
 func (service *managedService) waitForJobEmpty(timeout time.Duration) (bool, error) {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
