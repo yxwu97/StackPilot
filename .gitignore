@@ -9,6 +9,25 @@ node_modules/
 /output/
 *.log
 *.tmp
+/test/result/
+
+# Local configuration and credentials. Examples remain trackable.
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.kdbx
+
+# Local control-plane and fixture databases.
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
 
 .idea/
 .vscode/

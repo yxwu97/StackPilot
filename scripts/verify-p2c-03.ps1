@@ -11,7 +11,21 @@ $python = Join-Path $AIWSWorkspace 'agent-runtime/.venv/Scripts/python.exe'
 $configure = Join-Path $AIWSWorkspace 'agent-runtime/configure_keycloak.py'
 $runtimeDir = Join-Path $PSScriptRoot '../test/result/p2c-03'
 $overrideFile = Join-Path $runtimeDir 'compose.override.yml'
-$gatePassword = 'stackpilot-p2c03-gate-only'
+
+function New-GatePassword {
+    $bytes = New-Object byte[] 32
+    $random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $random.GetBytes($bytes)
+        return [Convert]::ToBase64String($bytes)
+    }
+    finally {
+        $random.Dispose()
+        [Array]::Clear($bytes, 0, $bytes.Length)
+    }
+}
+
+$gatePassword = New-GatePassword
 
 function Get-FreePort {
     $listener = [System.Net.Sockets.TcpListener]::new(
